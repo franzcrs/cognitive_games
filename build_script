@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Enter the current directory
+cd "$(dirname "$0")" || exit
+
+# Create the build directory
+mkdir build
+
+# Enter the build directory
+cd build
+
+# Build by using cmake
+cmake .. && make

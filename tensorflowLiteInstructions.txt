@@ -1,0 +1,72 @@
+Follow indications in:
+https://www.youtube.com/watch?v=mmEuHu5eSx0
+and:
+https://www.tensorflow.org/install/source
+
+Requirements:
+Install a distribution of python and pip with miniconda or miniforge
+Minforge for M1 chip:
+https://github.com/mrdbourke/m1-machine-learning-test#how-to-setup-a-tensorflow-environment-on-m1-m1-pro-m1-max-using-miniforge-shorter-version
+
+Install Xcode app and Command Line Tools
+https://www.freecodecamp.org/news/install-xcode-command-line-tools/
+
+Troubleshooting:
+The directory tree for tflite-dist should be:
+tflite-dist
+|
+|-- include
+|    |-- flatbuffer / (files)
+|    |-- tensorflow / lite / (files)
+|
+|-- libs / macM1 / libtensorflowlite.dylib
+
+Depending on the tensorflow version you download and build, the version of C++ for CMake can change. TensorFlow 2.16.1 requires C++17.
+
+This is the CMakeLists.txt that works
+----------------------------------------------------------------------
+# CMakeの最小バージョンを指定します。プロジェクトで使われているCMakeのコマンドや機能が、このバージョン以降で提供されていることを保証します。
+cmake_minimum_required(VERSION 3.0)
+
+# プロジェクトの名前を指定します。ここではプロジェクト名として'cognitiveGames'を設定しています。
+project(cognitiveGames)
+
+# ソースファイルを指定します。ここでは、main.cppをソースファイルとして設定しています。
+set(SOURCE_FILE main.cpp)
+
+# OpenCVが必要であることを示します。CMakeは、システム内でOpenCVを見つけ出し、それをビルドにリンクします。
+find_package(OpenCV REQUIRED)
+
+# CPP VERSION
+set(CMAKE_CXX_STANDARD 17)
+
+# OpenCVのヘッダーファイルへのパスをインクルードパスに追加します。これにより、ソースコード内でOpenCVのヘッダーを直接参照できます。
+# include 2 subdirectories of tflite include: tensorflow and flatbuffers
+include_directories(
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tflite-dist/include/
+)
+
+# add lib libtensorflowlite.dylib
+ADD_LIBRARY(tensorflowlite SHARED IMPORTED)
+set_property(TARGET tensorflowlite PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/tflite-dist/libs/macM1/libtensorflowlite.dylib)
+
+# 実行可能なバイナリー'main'を作成します。そのソースコードとして、上で定義したSOURCE_FILE（つまり、main.cpp）を使用します。
+add_executable(main
+    ${SOURCE_FILE}
+)
+
+# バイナリー'main'に対するリンクを設定します。ここでは、OpenCVライブラリをリンクしています。
+target_link_libraries(main
+    ${OpenCV_LIBRARIES}
+    tensorflowlite
+)
+----------------------------------------------------------------------
+
+zsh: segmentation fault Error happens when you assign a wrong type of the destination tensor
+
+
+
+
+
+

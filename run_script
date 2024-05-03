@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Enter the current directory
+cd "$(dirname "$0")" || exit
+
+# Enter the build directory
+cd build
+
+# Run the executable file
+./main
