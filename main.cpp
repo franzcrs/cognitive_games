@@ -475,8 +475,8 @@ int main(int argc, char **argv)
     else
     {
         // imageFile does not exist or is neither a file nor a folder
-        fprintf(stderr, "Invalid image file or folder\n");
-        exit(1);
+        fprintf(stderr, "Invalid image file or folder. Changing to camera source.\n");
+        paths.push_back("");
     }
 
     // Load Model
@@ -496,7 +496,7 @@ int main(int argc, char **argv)
     interpreter->SetNumThreads(-1);
 
     // Choose a tensor from model by a tensor index
-    /* 
+    /* Using mobilenet_v3small-075 class
     lite0-uint8
     Node  61 Operator Builtin Code   9 FULLY_CONNECTED (delegated by node 65)
     3 Input Tensors:[161,18,1] -> 0B (0.00MB)
@@ -757,6 +757,13 @@ int main(int argc, char **argv)
     std::vector<std::pair<float, int>> top_results; // Output tensor values
     float threshold = 0.01f; // Threshold for output tensor values
     auto frame = cv::imread(paths[0]);  // Load the first image
+    float cropProportionHeight = 0.9f; // Proportion of height to keep
+    float cropProportionWidth = 0.6f; // Proportion of width to keep
+    int frameHeight = frame.rows;
+    int frameWidth = frame.cols;
+    int cropHeight = static_cast<int>(frameHeight * cropProportionHeight);
+    int cropWidth = static_cast<int>(frameWidth * cropProportionWidth);
+    int numIters = 0; // Number of iterations
     for (const auto& imagePath : paths) {
         printf("********** Iteration start ********** \n");
         // Allocate tensor buffers.
@@ -771,13 +778,115 @@ int main(int argc, char **argv)
         // printf("Model input height, width, channels = %d, %d, %d \n", height, width, channels);
         
         // Load Input Image
-        cv::Mat image;
         frame = cv::imread(imagePath);
         TFLITE_MINIMAL_CHECK(!frame.empty());
         printf("Image loaded from %s \n", imagePath.c_str());
-        // TODO: Crop the image before resizing
+        int sliderValueX = 12;//35; // Slider value for X offset
+        int sliderValueY = 10;//0; // Slider value for Y offset
+        int maxSliderValueX = int((1.0-cropProportionWidth)*100); // Maximum slider value for X offset
+        int maxSliderValueY = int((1.0-cropProportionHeight)*100); // Maximum slider value for Y offset
+        float addOffsetX = sliderValueX / 100.0;
+        float addOffsetY = sliderValueY / 100.0;
+        cv::namedWindow("Frame", cv::WINDOW_NORMAL);
+        cv::String trackbarNameX = "Offset X:";
+        cv::String trackbarNameY = "Offset Y:";
+        cv::createTrackbar(trackbarNameX, "Frame", &sliderValueX, maxSliderValueX);
+        cv::createTrackbar(trackbarNameY, "Frame", &sliderValueY, maxSliderValueY);
+
+        int sliderValueShadow = 0; // Slider value for shadow reduction
+        int sliderValueSaturation = 12; // Slider value for saturation
+        int maxSliderValueShadow = 200; // Maximum slider value for shadow reduction
+        int maxSliderValueSaturation = 100; // Maximum slider value for saturation
+        int sliderValueMultiply = 260;//180;//260; // Slider value for multiply effect
+        int maxSliderValueMultiply = 800; // Maximum slider value for multiply effect
+        cv::String trackbarNameShadow = "Shadows:";
+        cv::String trackbarNameSaturation = "Saturation:";
+        cv::createTrackbar(trackbarNameShadow, "Frame", &sliderValueShadow, maxSliderValueShadow);
+        cv::createTrackbar(trackbarNameSaturation, "Frame", &sliderValueSaturation, maxSliderValueSaturation);
+        cv::String trackbarNameMultiply = "Multiply:";
+        cv::createTrackbar(trackbarNameMultiply, "Frame", &sliderValueMultiply, maxSliderValueMultiply);
+        bool inferenceButtonPressed = false;
+        while (true) {
+            // Clone the frame and draw the rectangle of the region to be cropped
+            cv::Mat frame_loop = frame.clone();
+            // Apply shadow reduction
+            cv::Mat frame_loop_shadow;
+            cv::addWeighted(frame_loop, 1.0, cv::Scalar(sliderValueShadow - maxSliderValueShadow/2), 0.0, 0.0, frame_loop_shadow);
+            // Apply saturation
+            cv::Mat frame_loop_saturation;
+            cv::cvtColor(frame_loop_shadow, frame_loop_saturation, cv::COLOR_BGR2HSV);
+            std::vector<cv::Mat> channels;
+            cv::split(frame_loop_saturation, channels);
+            channels[1] = channels[1] * ((sliderValueSaturation) / 100.0);
+            cv::merge(channels, frame_loop_saturation);
+            // Apply multiply effect
+            cv::Mat frame_loop_multiply;
+            cv::cvtColor(frame_loop_saturation, frame_loop_multiply, cv::COLOR_HSV2BGR);
+            cv::multiply(frame_loop_multiply, cv::Scalar(sliderValueMultiply / 100.0, sliderValueMultiply / 100.0, sliderValueMultiply / 100.0), frame_loop);
+            addOffsetX = (sliderValueX - maxSliderValueX/2) / 100.0;
+            addOffsetY = (sliderValueY - maxSliderValueY/2) / 100.0;
+            int cropOffsetX = int(((frameWidth - cropWidth) / 2) + addOffsetX*frameWidth);
+            int cropOffsetY = int(((frameHeight - cropHeight) / 2) + addOffsetY*frameHeight);
+            cv::rectangle(frame_loop, cv::Point(cropOffsetX, cropOffsetY), cv::Point(cropOffsetX + cropWidth, cropOffsetY + cropHeight), cv::Scalar(0, 255, 0), 2);
+            // cv::imshow("Frame", frame_loop);
+            break;
+            int key = cv::waitKey(1);
+            // Check if key is pressed to exit the loop
+            if (key == 'q') {
+            break;
+            } else if (key == 'i') {
+            inferenceButtonPressed = true;
+            break;
+            }
+        }
+        cv::destroyAllWindows();
+        // Apply shadow reduction
+        cv::Mat frame_loop_shadow;
+        cv::addWeighted(frame, 1.0, cv::Scalar(sliderValueShadow - maxSliderValueShadow/2), 0.0, 0.0, frame_loop_shadow);
+        // Apply saturation
+        cv::Mat frame_loop_saturation;
+        cv::cvtColor(frame_loop_shadow, frame_loop_saturation, cv::COLOR_BGR2HSV);
+        std::vector<cv::Mat> channels_sat;
+        cv::split(frame_loop_saturation, channels_sat);
+        channels_sat[1] = channels_sat[1] * ((sliderValueSaturation) / 100.0);
+        cv::merge(channels_sat, frame_loop_saturation);
+        // Apply multiply effect
+        cv::Mat frame_loop_multiply;
+        cv::cvtColor(frame_loop_saturation, frame_loop_multiply, cv::COLOR_HSV2BGR);
+        cv::multiply(frame_loop_multiply, cv::Scalar(sliderValueMultiply / 100.0, sliderValueMultiply / 100.0, sliderValueMultiply / 100.0), frame);
+        frame_loop_shadow.release();
+        frame_loop_saturation.release();
+        frame_loop_multiply.release();
+        int cropOffsetX = int(((frameWidth - cropWidth) / 2) + addOffsetX*frameWidth);
+        int cropOffsetY = int(((frameHeight - cropHeight) / 2) + addOffsetY*frameHeight);
+        cv::Rect cropRegion(cropOffsetX, cropOffsetY, cropWidth, cropHeight); // Crop region
+        // Crop frame
+        frame = frame(cropRegion);
+        // Crop the corners of the image in the shape of triangles
+        cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        cv::Point pts[4][3];
+        pts[0][0] = cv::Point(0, 0);
+        pts[0][1] = cv::Point(0, int(cropHeight/5));
+        pts[0][2] = cv::Point(cropWidth/6, 0);
+        pts[1][0] = cv::Point(cropWidth, 0);
+        pts[1][1] = cv::Point(cropWidth, cropHeight/5);
+        pts[1][2] = cv::Point(cropWidth - cropWidth/6, 0);
+        pts[2][0] = cv::Point(0, cropHeight);
+        pts[2][1] = cv::Point(0, cropHeight - cropHeight/5);
+        pts[2][2] = cv::Point(cropWidth/6, cropHeight);
+        pts[3][0] = cv::Point(cropWidth, cropHeight);
+        pts[3][1] = cv::Point(cropWidth, cropHeight - cropHeight/5);
+        pts[3][2] = cv::Point(cropWidth - cropWidth/6, cropHeight);
+        std::vector<cv::Point> poly1 = {pts[0][0], pts[0][1], pts[0][2]};
+        std::vector<cv::Point> poly2 = {pts[1][0], pts[1][1], pts[1][2]};
+        std::vector<cv::Point> poly3 = {pts[2][0], pts[2][1], pts[2][2]};
+        std::vector<cv::Point> poly4 = {pts[3][0], pts[3][1], pts[3][2]};
+        std::vector<std::vector<cv::Point>> polygons = {poly1, poly2, poly3, poly4};
+        cv::fillPoly(mask, polygons, cv::Scalar(255));
+        frame.setTo(cv::Scalar(0), mask);
         // TODO: Create folder of images
         // Copy image to input tensor size
+        cv::Mat image;
         cv::resize(frame, image, cv::Size(width, height), cv::INTER_NEAREST);
         // printf("Image resized to %dx%d \n", width, height);
         if (myTensorIndex>220){
@@ -865,7 +974,7 @@ int main(int argc, char **argv)
             // Retrieve output tensor values
             float32_t* tensor_data_ptr = interpreter->typed_tensor<float32_t>(myTensorIndex);
             // Save tensor to file
-            std::ofstream outputFile("/Users/kubotamacmini/Documents/cognitive_games/L_vectors.txt", std::ios::app);
+            std::ofstream outputFile("/Users/kubotamacmini/Documents/cognitive_games/vectors.txt", std::ios::app);
             if (outputFile.is_open()) {
                 for (int i = 0; i < numElements; i++) {
                     if (myTensorType == kTfLiteFloat32) {
@@ -876,9 +985,9 @@ int main(int argc, char **argv)
                 }
                 outputFile << "\n";
                 outputFile.close();
-                printf("Tensor saved to file: L_vectors.txt\n");
+                printf("Tensor saved to file: vectors.txt\n");
             } else {
-                printf("Failed to open file: L_vectors.txt\n");
+                printf("Failed to open file: vectors.txt\n");
             }
             // Print the some elements of the tensor
             // printf("Some elements of the tensor [%d]:\n", myTensorIndex);
@@ -889,9 +998,10 @@ int main(int argc, char **argv)
 
         // Clean up the interpreter
         interpreter->ResetVariableTensors();
+        numIters += 1;
         printf("********** Iteration end ********** \n");
     }
-
+    printf("Number of iterations: %d\n", numIters);
     
     
     if (paths.size() == 1) {
