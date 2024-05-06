@@ -773,8 +773,8 @@ int main(int argc, char **argv)
     float threshold = 0.01f; // Threshold for output tensor values
     cv::Mat frame; // Placeholder for the current frame
     frame = cv::imread(paths[0]);
-    float cropProportionHeight = 0.9f; // Proportion of height to keep
-    float cropProportionWidth = 0.6f; // Proportion of width to keep
+    float cropProportionHeight = 0.7f;//0.9f; // Proportion of height to keep
+    float cropProportionWidth = 0.5f;//0.6f; // Proportion of width to keep
     int frameHeight = frame.rows;
     int frameWidth = frame.cols;
     int cropHeight = static_cast<int>(frameHeight * cropProportionHeight);
@@ -797,9 +797,9 @@ int main(int argc, char **argv)
         frame = cv::imread(imagePath);
         TFLITE_MINIMAL_CHECK(!frame.empty());
         if (!readFromCamera) printf("Image loaded from %s \n", imagePath.c_str());
-        int sliderOffsetX = 13;//35; // Slider value for X offset
+        int sliderOffsetX = 29;//13;//35; // Slider value for X offset
         int storedOffsetX = sliderOffsetX;//35; // Slider value for X offset
-        int sliderOffsetY = 10;//0; // Slider value for Y offset
+        int sliderOffsetY = 22;//10;//0; // Slider value for Y offset
         int storedOffsetY = sliderOffsetY;//0; // Slider value for Y offset
         int maxSliderValueX = int((1.0-cropProportionWidth)*100); // Maximum slider value for X offset
         int maxSliderValueY = int((1.0-cropProportionHeight)*100); // Maximum slider value for Y offset
@@ -817,7 +817,7 @@ int main(int argc, char **argv)
         int storedValueSaturation = sliderValueSaturation; // Slider value for saturation
         int maxSliderValueShadow = 200; // Maximum slider value for shadow reduction
         int maxSliderValueSaturation = 100; // Maximum slider value for saturation
-        int sliderValueMultiply = 148;//180;//260; // Slider value for multiply effect
+        int sliderValueMultiply = 135;//148;//180;//260; // Slider value for multiply effect
         int storedValueMultiply = sliderValueMultiply; // Slider value for multiply effect
         int maxSliderValueMultiply = 800; // Maximum slider value for multiply effect
         cv::String trackbarNameShadow = "Shadows:";
@@ -836,6 +836,12 @@ int main(int argc, char **argv)
                 printf("Failed to capture frame from camera\n");
                 return -1;
             }
+            // // Rotate frame_loop
+            // cv::rotate(frame_loop, frame_loop, cv::ROTATE_180);
+            // Zoom in frame_loop
+            cv::Mat zoomed_frame_loop;
+            cv::resize(frame_loop, zoomed_frame_loop, cv::Size(), 1.5, 1.5, cv::INTER_LINEAR);
+            frame_loop = zoomed_frame_loop(cv::Rect((zoomed_frame_loop.cols - frame_loop.cols) / 2, (zoomed_frame_loop.rows - frame_loop.rows) / 2, frame_loop.cols, frame_loop.rows));
             // Apply shadow reduction
             cv::Mat frame_loop_shadow;
             cv::addWeighted(frame_loop, 1.0, cv::Scalar(storedValueShadow - maxSliderValueShadow/2), 0.0, 0.0, frame_loop_shadow);
@@ -864,6 +870,7 @@ int main(int argc, char **argv)
             int key = cv::waitKey(1);
             // Check if key is pressed to exit the loop
             if (key == 'q') {
+            frame = frame_loop;
             break;
             } else if (key == 'i') {
             frame = frame_loop;

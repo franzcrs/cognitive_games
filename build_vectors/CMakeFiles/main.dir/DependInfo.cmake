@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/Users/kubotamacmini/Documents/cognitive_games/main.cpp" "CMakeFiles/main.dir/main.cpp.o" "gcc" "CMakeFiles/main.dir/main.cpp.o.d"
+  "/Users/kubotamacmini/Documents/cognitive_games/main_vectors.cpp" "CMakeFiles/main.dir/main_vectors.cpp.o" "gcc" "CMakeFiles/main.dir/main_vectors.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.
