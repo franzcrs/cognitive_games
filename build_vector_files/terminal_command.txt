@@ -1,1 +1,0 @@
-./main ../mobilenet_v3small-075-224-feature-vector.tflite ../efficientnet_labels.txt ../None

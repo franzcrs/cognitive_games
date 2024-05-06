@@ -399,7 +399,7 @@ int main(int argc, char* argv[]) {
   return 0;
 }
 */
-#include <iostream>
+
 #include <fstream>
 #include <string>
 #include <vector>
@@ -411,8 +411,6 @@ int main(int argc, char* argv[]) {
 #include "tensorflow/lite/model.h"
 #include "tensorflow/lite/optional_debug_tools.h"
 #include <filesystem>
-#include <cmath>
-#include <sstream>
 
 #define TFLITE_MINIMAL_CHECK(x)                              \
   if (!(x)) {                                                \
@@ -420,109 +418,7 @@ int main(int argc, char* argv[]) {
     exit(1);                                                 \
   }
 
-std::vector<double> split(const std::string& str, char delimiter) {
-    std::vector<double> tokens;
-    std::string token;
-    std::istringstream tokenStream(str);
-    while (std::getline(tokenStream, token, delimiter)) {
-        tokens.push_back(std::stod(token));
-    }
-    return tokens;
-}
-
-double compute_new_node_attribute(const std::vector<double>& node_data, const std::vector<double>& centroid_data, const std::string& similarity_type = "cosine") {
-    double new_node_attribute;
-    if (similarity_type == "cosine") {
-        double dot_product = 0.0;
-        double norm_node_data = 0.0;
-        double norm_centroid_data = 0.0;
-        for (size_t i = 0; i < node_data.size(); i++) {
-            dot_product += node_data[i] * centroid_data[i];
-            norm_node_data += node_data[i] * node_data[i];
-            norm_centroid_data += centroid_data[i] * centroid_data[i];
-        }
-        norm_node_data = std::sqrt(norm_node_data);
-        norm_centroid_data = std::sqrt(norm_centroid_data);
-        new_node_attribute = 1 - (dot_product / (norm_node_data * norm_centroid_data));
-    } else {
-        double sum_of_squares = 0.0;
-        for (size_t i = 0; i < node_data.size(); i++) {
-            double diff = node_data[i] - centroid_data[i];
-            sum_of_squares += diff * diff;
-        }
-        new_node_attribute = std::sqrt(sum_of_squares);
-    }
-    return new_node_attribute;
-}
-
-std::vector<double> compute_nodes_attribute(const std::string& cluster_file, std::vector<double>& centroid_data, const std::string& centroid_type = "mean", const std::string& similarity_type = "cosine") {
-    std::ifstream file(cluster_file);
-    std::vector<double> nodes_attribute;
-    std::vector<std::vector<double>> nodes_data;
-    if (file.is_open()) {
-        std::string line;
-        int n_rows = 0;
-        if (std::getline(file, line)) {
-            std::vector<double> node_data = split(line, ' ');
-            for (size_t i = 0; i < node_data.size(); i++) {
-                centroid_data.push_back(node_data[i]);
-            }
-            nodes_data.push_back(node_data);
-            n_rows += 1;
-        }
-        while (std::getline(file, line)) {
-            std::vector<double> node_data = split(line, ' ');
-            for (size_t i = 0; i < node_data.size(); i++) {
-                centroid_data[i] += node_data[i];
-            }
-            nodes_data.push_back(node_data);
-            n_rows += 1;
-        }
-        for (size_t i = 0; i < centroid_data.size(); i++) {
-            centroid_data[i] /= n_rows;
-        }
-    }
-    for (const std::vector<double>& node_data : nodes_data) {
-        double new_node_attribute = compute_new_node_attribute(node_data, centroid_data, similarity_type);
-        nodes_attribute.push_back(new_node_attribute);
-    }
-
-    return nodes_attribute;
-}
-
-std::vector<std::vector<double>> calculate_centroids(const std::vector<std::string>& file_paths, const std::string& centroid_type = "mean", const std::string& similarity_type = "cosine") {
-    printf("Similarity type: %s\n", similarity_type.c_str());
-    std::vector<std::vector<double>> nodes_attributes_per_cluster;
-    std::vector<std::vector<double>> centroids_per_cluster;
-    printf("Nodes attributes per cluster initialized\n");
-    for (const std::string& file_path : file_paths) {
-        std::vector<double> centroid_vector;
-        std::vector<double> nodes_attribute = compute_nodes_attribute(file_path, centroid_vector, centroid_type, similarity_type);
-        nodes_attributes_per_cluster.push_back(nodes_attribute);
-        centroids_per_cluster.push_back(centroid_vector);
-        printf("Calculating nodes attributes and centroid for cluster: %s\n", file_path.c_str());
-    }
-    return centroids_per_cluster;
-}
-
-std::pair<int, std::string> find_similar_class(const std::vector<double>& new_feature_vector, std::vector<std::vector<double>>& centroids_per_cluster, const std::vector<std::string>& class_labels, const std::string& similarity_type = "cosine") {
-    std::vector<double> new_node_attributes;
-    printf("New node attributes initialized\n");
-    int index = 0;
-    for (const std::vector<double>& centroid_vector : centroids_per_cluster) {
-        double new_node_attribute = compute_new_node_attribute(new_feature_vector, centroid_vector, similarity_type);
-        new_node_attributes.push_back(new_node_attribute);
-        printf("Calculating new node's attribute w.r.t. cluster: %s\n", class_labels[index].c_str());
-        index += 1;
-    }
-    printf("Classifying ...\n");
-    int class_index = std::distance(new_node_attributes.begin(), std::min_element(new_node_attributes.begin(), new_node_attributes.end()));
-    printf("Class index: %d\n", class_index);
-    printf("Class label: %s\n", class_labels[class_index].c_str());
-    return std::make_pair(class_index, class_labels[class_index]);
-}
-
-std::vector<std::string> load_model_labels(std::string labels_file)
+std::vector<std::string> load_labels(std::string labels_file)
 {
     std::ifstream file(labels_file.c_str());
     TFLITE_MINIMAL_CHECK(file.is_open())
@@ -549,32 +445,18 @@ int main(int argc, char **argv)
 {
 
     // Get Model label and input image
-    // if (argc != 4)
-    // {
-    //     fprintf(stderr, "Run as: ./main modelfile labels image\n");
-    //     exit(1);
-    // }
-    // const char *modelFileName = argv[1];
-    // const char *labelFile = argv[2];
-    // const char *imageFile = argv[3];
-
-    const char *modelFileName = "/Users/kubotamacmini/Documents/cognitive_games/mobilenet_v3small-075-224-feature-vector.tflite";
-    const char *labelFile = "/Users/kubotamacmini/Documents/cognitive_games/efficientnet_labels.txt";
-    const char *imageFile = "camera";
-
-    std::vector<std::string> clusters_files_path = {
-        "/Users/kubotamacmini/Documents/cognitive_games/L_vectors_last.txt",
-        "/Users/kubotamacmini/Documents/cognitive_games/C_vectors_last.txt",
-        "/Users/kubotamacmini/Documents/cognitive_games/None_vectors_last.txt"
-    };
-    std::vector<std::string> class_labels = {
-        "L",
-        "C",
-        "None"
-    };
-    std::string centroid_type = "mean";// In the meantime only mean is supported
-    std::string similarity_type = "cosine";//"euclidean";
-    std::vector<std::vector<double>> centroid_per_cluster = calculate_centroids(clusters_files_path, centroid_type, similarity_type);
+    if (argc != 4)
+    {
+        fprintf(stderr, "Run as: ./main modelfile labels image\n");
+        exit(1);
+    }
+    // const char *modelFileName = "/Users/kubotamacmini/Documents/cognitive_games/mobilenet_v3_large-075-224-feature-vector.tflite";//argv[1];
+    // const char *labelFile = "/Users/kubotamacmini/Documents/cognitive_games/imagenet_labels.txt";//argv[2];
+    // const char *imageFile = "/Users/kubotamacmini/Documents/camera/build/None/photo_1714112877.jpg";//argv[3];
+    
+    const char *modelFileName = argv[1];
+    const char *labelFile = argv[2];
+    const char *imageFile = argv[3];
 
     std::vector<std::string> paths;
     bool readFromCamera = false;
@@ -842,9 +724,9 @@ int main(int argc, char **argv)
     tensor_data_ptr[999]: 0.538711
 
     */
-    int myTensorIndex = 221;
-    // std::cout << "Enter the index of the Tensor before the Softmax layer [212 for lite1-uint8, lite2-uint8; 4 for mobilenet_v1, 221 for mobilenet_v3small]: ";
-    // std::cin >> myTensorIndex;
+    int myTensorIndex;
+    std::cout << "Enter the index of the Tensor before the Softmax layer [212 for lite1-uint8, lite2-uint8; 4 for mobilenet_v1, 221 for mobilenet_v3small]: ";
+    std::cin >> myTensorIndex;
     // Getting the tensor
     TfLiteTensor* myTensor = interpreter->tensor(myTensorIndex);
     // Get the number of dimensions in the tensor
@@ -852,7 +734,7 @@ int main(int argc, char **argv)
     // Print the number of dimensions in the tensor
     printf("Number of dimensions in the tensor [%d]: %d\n", myTensorIndex, numDims);
     if (numDims > 2) {
-        printf("Tensor is not 2D. Feature vector values will not be shown. \nMost probably you have selected a classification mobilenet model instead of the features version\n");
+        printf("Tensor is not 2D. Feature vector values will not be shown. \nMost probably you have inserted a classification mobilenet model instead of the features version\n");
     }
     // Get the number of elements in the tensor
     int numElements = 1;
@@ -863,7 +745,7 @@ int main(int argc, char **argv)
         // printf("Dimension %d: %d\n", i, myTensor->dims->data[i]);
     }
     // Print the number of elements in the tensor
-    // printf("Number of elements in the tensor: [%d]: %d\n", myTensorIndex, numElements);
+    printf("Number of elements in the tensor: [%d]: %d\n", myTensorIndex, numElements);
     // Get the type of the tensor
     TfLiteType myTensorType = myTensor->type;
     int unit_memory = 1;
@@ -888,8 +770,7 @@ int main(int argc, char **argv)
     // Run inferences for all images in the paths vector
     auto inference_time = 0; // One interation inference time
     std::vector<std::pair<float, int>> top_results; // Output tensor values
-    float threshold = 0.1f; // Threshold for output tensor values
-
+    float threshold = 0.01f; // Threshold for output tensor values
     cv::Mat frame; // Placeholder for the current frame
     frame = cv::imread(paths[0]);
     float cropProportionHeight = 0.9f; // Proportion of height to keep
@@ -903,7 +784,7 @@ int main(int argc, char **argv)
         printf("********** Iteration start ********** \n");
         // Allocate tensor buffers.
         TFLITE_MINIMAL_CHECK(interpreter->AllocateTensors() == kTfLiteOk);
-        // printf("Interpreter Tensors could be allocated \n");
+        printf("Interpreter Tensors could be allocated \n");
 
         // Get Input Tensor Dimensions
         int input = interpreter->inputs()[0];
@@ -947,10 +828,8 @@ int main(int argc, char **argv)
         cv::createTrackbar(trackbarNameMultiply, "Frame", &sliderValueMultiply, maxSliderValueMultiply, onTrackbarChange, &storedValueMultiply);
         bool inferenceButtonPressed = false;
         while (true) {
-            // Allocate tensor buffers.
-            TFLITE_MINIMAL_CHECK(interpreter->AllocateTensors() == kTfLiteOk);
             // Clone the frame and draw the rectangle of the region to be cropped
-            cv::Mat frame_loop;// = frame.clone();
+            cv::Mat frame_loop = frame.clone();
             // Get frame from camera
             if (readFromCamera) cap.read(frame_loop);
             if (readFromCamera && frame_loop.empty()) {
@@ -977,158 +856,17 @@ int main(int argc, char **argv)
             int cropOffsetY = int(((frameHeight - cropHeight) / 2) + addOffsetY*frameHeight);
             cv::Mat frame_loop_wrect = frame_loop.clone();
             cv::rectangle(frame_loop_wrect, cv::Point(cropOffsetX, cropOffsetY), cv::Point(cropOffsetX + cropWidth, cropOffsetY + cropHeight), cv::Scalar(0, 255, 0), 2);
-
-            frame = frame_loop;
-            // Crop region
-            cv::Rect cropRegion(cropOffsetX, cropOffsetY, cropWidth, cropHeight);
-            // Crop frame
-            frame = frame(cropRegion);
             
-            // Crop the corners of the image in the shape of triangles
-            cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
-            cv::Point pts[4][3];
-            pts[0][0] = cv::Point(0, 0);
-            pts[0][1] = cv::Point(0, int(cropHeight/5));
-            pts[0][2] = cv::Point(cropWidth/6, 0);
-            pts[1][0] = cv::Point(cropWidth, 0);
-            pts[1][1] = cv::Point(cropWidth, cropHeight/5);
-            pts[1][2] = cv::Point(cropWidth - cropWidth/6, 0);
-            pts[2][0] = cv::Point(0, cropHeight);
-            pts[2][1] = cv::Point(0, cropHeight - cropHeight/5);
-            pts[2][2] = cv::Point(cropWidth/6, cropHeight);
-            pts[3][0] = cv::Point(cropWidth, cropHeight);
-            pts[3][1] = cv::Point(cropWidth, cropHeight - cropHeight/5);
-            pts[3][2] = cv::Point(cropWidth - cropWidth/6, cropHeight);
-            std::vector<cv::Point> poly1 = {pts[0][0], pts[0][1], pts[0][2]};
-            std::vector<cv::Point> poly2 = {pts[1][0], pts[1][1], pts[1][2]};
-            std::vector<cv::Point> poly3 = {pts[2][0], pts[2][1], pts[2][2]};
-            std::vector<cv::Point> poly4 = {pts[3][0], pts[3][1], pts[3][2]};
-            std::vector<std::vector<cv::Point>> polygons = {poly1, poly2, poly3, poly4};
-            cv::fillPoly(mask, polygons, cv::Scalar(255));
-            frame.setTo(cv::Scalar(0), mask);
-
-            // Copy image to input tensor size
-            cv::Mat image;
-            cv::resize(frame, image, cv::Size(width, height), cv::INTER_NEAREST);
-            // printf("Image resized to %dx%d \n", width, height);
-            if (myTensorIndex>220){
-                // Normalize image from 0 to 1
-                image.convertTo(image, CV_32F, 1.0 / 255.0);
-            }
-            switch (interpreter->tensor(input)->type)
-            {
-            case kTfLiteFloat32:
-                memcpy(interpreter->typed_input_tensor<float32_t>(0), image.data, image.total() * image.elemSize());
-                break;
-            case kTfLiteUInt8:
-                memcpy(interpreter->typed_input_tensor<uint8_t>(0), image.data, image.total() * image.elemSize());
-                break;
-            case kTfLiteInt8:
-                memcpy(interpreter->typed_input_tensor<uint8_t>(0), image.data, image.total() * image.elemSize());
-                break;
-            default:
-                fprintf(stderr, "cannot handle input type\n");
-                exit(1);
-            }
-            // printf("Image copied to first input tensor\n");
-
-            // Inference
-            std::chrono::steady_clock::time_point start, end;
-            start = std::chrono::steady_clock::now();
-            TFLITE_MINIMAL_CHECK(interpreter->Invoke() == kTfLiteOk);//interpreter->Invoke();
-            end = std::chrono::steady_clock::now();
-            inference_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-            // printf("End of inference. Inference time : %s \n", std::to_string(inference_time).c_str());
-
-            // Get Output tensor index
-            int output = interpreter->outputs()[0];
-            TfLiteIntArray *output_dims = interpreter->tensor(output)->dims;
-            auto output_size = output_dims->data[output_dims->size - 1];
-            // Get the model classificaiton results
-            // std::vector<std::pair<float, int>> top_results;
-            // float threshold = 0.01f;
-            switch (interpreter->tensor(output)->type)
-            {
-            case kTfLiteInt32:
-                tflite::label_image::get_top_n<float32_t>(interpreter->typed_output_tensor<float32_t>(0), output_size, 1, threshold, &top_results, kTfLiteFloat32);
-                break;
-            case kTfLiteFloat32:
-                tflite::label_image::get_top_n<float32_t>(interpreter->typed_output_tensor<float32_t>(0), output_size, 1, threshold, &top_results, kTfLiteFloat32);
-                break;
-            case kTfLiteUInt8:
-                tflite::label_image::get_top_n<uint8_t>(interpreter->typed_output_tensor<uint8_t>(0), output_size, 1, threshold, &top_results, kTfLiteUInt8);
-                break;
-            case kTfLiteInt8:
-                tflite::label_image::get_top_n<uint8_t>(interpreter->typed_output_tensor<uint8_t>(0), output_size, 1, threshold, &top_results, kTfLiteUInt8);
-                break;
-            default:
-                fprintf(stderr, "cannot handle output type\n");
-                exit(1);
-            }
-
-            // Vector to save the tensor values
-            std::vector<double> tensor_vector;
-            // Retrieve selected tensor values
-            if (myTensorType == kTfLiteUInt8 && numDims == 2) {
-                printf("Type of the selected tensor [%d]: kTfLiteUInt8\n", myTensorIndex);
-                // Retrieve output tensor values
-                uint8_t* tensor_data_ptr = interpreter->typed_tensor<uint8_t>(myTensorIndex);
-                // Print the some elements of the tensor
-                printf("Some elements of the tensor [%d]:\n", myTensorIndex);
-                for (int i = 500; i < 1000; i++) {
-                    printf("tensor_data_ptr[%d]: %d\n", i, tensor_data_ptr[i]);
-                }
-            } else if (myTensorType == kTfLiteInt8 && numDims == 2) {
-                printf("Type of the selected tensor [%d]: kTfLiteInt8\n", myTensorIndex);
-                // Retrieve output tensor values
-                int8_t* tensor_data_ptr = interpreter->typed_tensor<int8_t>(myTensorIndex);
-                // Print the some elements of the tensor
-                printf("Some elements of the tensor [%d]:\n", myTensorIndex);
-                for (int i = 500; i < 1000; i++) {
-                    printf("tensor_data_ptr[%d]: %d\n", i, tensor_data_ptr[i]);
-                }
-            } else if (myTensorType == kTfLiteFloat32 && numDims == 2) {
-                // printf("Type of the selected tensor [%d]: kTfLiteFloat32\n", myTensorIndex);
-                // Retrieve output tensor values
-                float32_t* tensor_data_ptr = interpreter->typed_tensor<float32_t>(myTensorIndex);
-                for (int i = 0; i < numElements; i++) {
-                    tensor_vector.push_back(tensor_data_ptr[i]);
-                }
-                // std::ofstream outputFile("/Users/kubotamacmini/Documents/cognitive_games/curr_vector.txt", std::ios::app);
-                // if (outputFile.is_open()) {
-                //     for (int i = 0; i < numElements; i++) {
-                //         if (myTensorType == kTfLiteFloat32) {
-                //             outputFile << std::fixed << std::setprecision(6) << tensor_data_ptr[i] << " ";
-                //         } else {
-                //             outputFile << tensor_data_ptr[i] << " ";
-                //         }
-                //     }
-                //     outputFile << "\n";
-                //     outputFile.close();
-                //     // printf("Tensor saved to file: curr_vector.txt\n");
-                // } else {
-                //     printf("Failed to open file: curr_vector.txt\n");
-                // }
-            }
-            // Classify the image features vector
-            std::pair<int, std::string> similar_class = find_similar_class(tensor_vector, centroid_per_cluster, class_labels);
-
-            cv::putText(frame_loop_wrect, "Figure recognized as "+similar_class.second, cv::Point(0.45*frameWidth , 0.9*frameHeight), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 2);
-            cv::imshow("Frame", frame_loop_wrect);
-
-
-            // Clean up the interpreter
-            interpreter->ResetVariableTensors();
-
-            // break;
+            // cv::imshow("Frame", frame_loop_wrect);
+            frame = frame_loop;
+            break;
             
             int key = cv::waitKey(1);
             // Check if key is pressed to exit the loop
             if (key == 'q') {
-            // frame = frame_loop;
             break;
             } else if (key == 'i') {
-            // frame = frame_loop;
+            frame = frame_loop;
             inferenceButtonPressed = true;
             break;
             }
@@ -1136,7 +874,254 @@ int main(int argc, char **argv)
         cap.release(); // Release the camera
         cv::destroyAllWindows();
         printf("Sliders stored values: \nShadow: %d, Saturation: %d, Multiply: %d \n", storedValueShadow, storedValueSaturation, storedValueMultiply);
+        
+        // // Apply shadow reduction
+        // cv::Mat frame_loop_shadow;
+        // cv::addWeighted(frame, 1.0, cv::Scalar(storedValueShadow - maxSliderValueShadow/2), 0.0, 0.0, frame_loop_shadow);
+        // // Apply saturation
+        // cv::Mat frame_loop_saturation;
+        // cv::cvtColor(frame_loop_shadow, frame_loop_saturation, cv::COLOR_BGR2HSV);
+        // std::vector<cv::Mat> channels_sat;
+        // cv::split(frame_loop_saturation, channels_sat);
+        // channels_sat[1] = channels_sat[1] * ((storedValueSaturation) / 100.0);
+        // cv::merge(channels_sat, frame_loop_saturation);
+        // // Apply multiply effect
+        // cv::Mat frame_loop_multiply;
+        // cv::cvtColor(frame_loop_saturation, frame_loop_multiply, cv::COLOR_HSV2BGR);
+        // cv::multiply(frame_loop_multiply, cv::Scalar(storedValueMultiply / 100.0, storedValueMultiply / 100.0, storedValueMultiply / 100.0), frame);
+        // frame_loop_shadow.release();
+        // frame_loop_saturation.release();
+        // frame_loop_multiply.release();
+        addOffsetX = (storedOffsetX - maxSliderValueX/2) / 100.0;
+        addOffsetY = (storedOffsetY - maxSliderValueY/2) / 100.0;
+        int cropOffsetX = int(((frameWidth - cropWidth) / 2) + addOffsetX*frameWidth);
+        int cropOffsetY = int(((frameHeight - cropHeight) / 2) + addOffsetY*frameHeight);
+        cv::Rect cropRegion(cropOffsetX, cropOffsetY, cropWidth, cropHeight); // Crop region
+        // Crop frame
+        frame = frame(cropRegion);
+        
+        // Crop the corners of the image in the shape of triangles
+        cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        cv::Point pts[4][3];
+        pts[0][0] = cv::Point(0, 0);
+        pts[0][1] = cv::Point(0, int(cropHeight/5));
+        pts[0][2] = cv::Point(cropWidth/6, 0);
+        pts[1][0] = cv::Point(cropWidth, 0);
+        pts[1][1] = cv::Point(cropWidth, cropHeight/5);
+        pts[1][2] = cv::Point(cropWidth - cropWidth/6, 0);
+        pts[2][0] = cv::Point(0, cropHeight);
+        pts[2][1] = cv::Point(0, cropHeight - cropHeight/5);
+        pts[2][2] = cv::Point(cropWidth/6, cropHeight);
+        pts[3][0] = cv::Point(cropWidth, cropHeight);
+        pts[3][1] = cv::Point(cropWidth, cropHeight - cropHeight/5);
+        pts[3][2] = cv::Point(cropWidth - cropWidth/6, cropHeight);
+        std::vector<cv::Point> poly1 = {pts[0][0], pts[0][1], pts[0][2]};
+        std::vector<cv::Point> poly2 = {pts[1][0], pts[1][1], pts[1][2]};
+        std::vector<cv::Point> poly3 = {pts[2][0], pts[2][1], pts[2][2]};
+        std::vector<cv::Point> poly4 = {pts[3][0], pts[3][1], pts[3][2]};
+        std::vector<std::vector<cv::Point>> polygons = {poly1, poly2, poly3, poly4};
+        cv::fillPoly(mask, polygons, cv::Scalar(255));
+        frame.setTo(cv::Scalar(0), mask);
+        
+        // // Load names of classes
+        // std::string classesFile = "coco.names";
+        // std::ifstream ifs(classesFile.c_str());
+        // std::string line;
+        // std::vector<std::string> classes;
+        // while (getline(ifs, line)) classes.push_back(line);
+        // // Load the object detection model
+        // cv::dnn::Net model = cv::dnn::readNetFromDarknet("/Users/kubotamacmini/Documents/cognitive_games/yolov3.cfg", "/Users/kubotamacmini/Documents/cognitive_games/yolov3.weights");
+        // printf("Yolo model loaded \n");
+        // // Create a blob from the frame
+        // cv::Mat blob = cv::dnn::blobFromImage(frame, 1 / 255.0, cv::Size(416, 416), cv::Scalar(0, 0, 0), true, false);
+        // // Set the input blob for the model
+        // model.setInput(blob);
+        // printf("Blob set as input \n");
+        // // Get the output layer names
+        // std::vector<cv::String> outputLayerNames = model.getUnconnectedOutLayersNames();
+        // // Forward pass through the model
+        // std::vector<cv::Mat> outputs;
+        // model.forward(outputs, outputLayerNames);
+        // // Process the outputs
+        // for (const cv::Mat& output : outputs) {
+        //     // Process each detection
+        //     for (int i = 0; i < output.rows; i++) {
+        //         cv::Mat detection = output.row(i);
+        //         // Extract the class ID, confidence, and bounding box coordinates
+        //         int classId;
+        //         float confidence;
+        //         cv::Rect bbox;
+        //         float* data = (float*)detection.data;
+        //         classId = static_cast<int>(data[1]);
+        //         confidence = data[2];
+        //         bbox.x = static_cast<int>(data[3] * frame.cols);
+        //         bbox.y = static_cast<int>(data[4] * frame.rows);
+        //         bbox.width = static_cast<int>(data[5] * frame.cols);
+        //         bbox.height = static_cast<int>(data[6] * frame.rows);
+        //         // Filter detections based on confidence threshold
+        //         if (confidence > 0.0) {
+        //             // Draw bounding box and class label on the frame
+        //             cv::rectangle(frame, bbox, cv::Scalar(0, 255, 0), 2);
+        //             cv::putText(frame, cv::format("%s: %.2f", classes[classId].c_str(), confidence), cv::Point(bbox.x, bbox.y - 10), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 2);
+        //         }
+        //     }
+        // }
+        // // Show the frame with detections
+        // cv::imshow("Frame with Detections", frame);
+        // cv::waitKey(0);
 
+        // // Convert image to grayscale
+        // cv::Mat grayImage;
+        // cv::cvtColor(frame, grayImage, cv::COLOR_BGR2GRAY);
+        // // Apply binary thresholding
+        // cv::Mat binaryImage;
+        // cv::threshold(grayImage, binaryImage, 120, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+        // // Find contours in the binary image
+        // std::vector<std::vector<cv::Point>> contours;
+        // cv::findContours(binaryImage, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        // // Filter contours based on size
+        // std::vector<std::vector<cv::Point>> filteredContours;
+        // int frameArea = frame.cols * frame.rows;
+        // int minContourArea = frameArea * 0.01; // Minimum contour area as a percentage of the frame area
+        // int maxContourArea = frameArea * 0.9; // Maximum contour area as a percentage of the frame area
+        // for (const auto& contour : contours) {
+        //     double contourArea = cv::contourArea(contour);
+        //     if (contourArea > minContourArea && contourArea < maxContourArea) {
+        //     filteredContours.push_back(contour);
+        //     }
+        // }
+        // // Find the contour with the largest area
+        // double maxArea = 0;
+        // int maxAreaIdx = -1;
+        // for (int i = 0; i < filteredContours.size(); i++) {
+        //     double area = cv::contourArea(filteredContours[i]);
+        //     if (area > maxArea) {
+        //         maxArea = area;
+        //         maxAreaIdx = i;
+        //     }
+        // }
+        // // Enclose the contour with a rectangle
+        // if (maxAreaIdx != -1) {
+        //     cv::Rect boundingRect = cv::boundingRect(contours[maxAreaIdx]);
+        //     cv::Mat frame_wrect = frame.clone();
+        //     cv::rectangle(frame_wrect, boundingRect, cv::Scalar(0, 0, 255), 2);
+        //     cv::imshow("Frame with Rectangle", frame_wrect);
+        //     cv::waitKey(0);
+        // }
+
+        // Copy image to input tensor size
+        cv::Mat image;
+        cv::resize(frame, image, cv::Size(width, height), cv::INTER_NEAREST);
+        // printf("Image resized to %dx%d \n", width, height);
+        if (myTensorIndex>220){
+            // Normalize image from 0 to 1
+            image.convertTo(image, CV_32F, 1.0 / 255.0);
+        }
+        switch (interpreter->tensor(input)->type)
+        {
+        case kTfLiteFloat32:
+            memcpy(interpreter->typed_input_tensor<float32_t>(0), image.data, image.total() * image.elemSize());
+            break;
+        case kTfLiteUInt8:
+            memcpy(interpreter->typed_input_tensor<uint8_t>(0), image.data, image.total() * image.elemSize());
+            break;
+        case kTfLiteInt8:
+            memcpy(interpreter->typed_input_tensor<uint8_t>(0), image.data, image.total() * image.elemSize());
+            break;
+        default:
+            fprintf(stderr, "cannot handle input type\n");
+            exit(1);
+        }
+        // printf("Image copied to first input tensor\n");
+
+        // Inference
+        std::chrono::steady_clock::time_point start, end;
+        start = std::chrono::steady_clock::now();
+        TFLITE_MINIMAL_CHECK(interpreter->Invoke() == kTfLiteOk);//interpreter->Invoke();
+        end = std::chrono::steady_clock::now();
+        inference_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        printf("End of inference. Inference time : %s \n", std::to_string(inference_time).c_str());
+
+        // Get Output
+        int output = interpreter->outputs()[0];
+        TfLiteIntArray *output_dims = interpreter->tensor(output)->dims;
+        auto output_size = output_dims->data[output_dims->size - 1];
+        printf("Output size: %d \n", output_size);
+
+        // Get the output tensor values
+        // std::vector<std::pair<float, int>> top_results;
+        // float threshold = 0.01f;
+        switch (interpreter->tensor(output)->type)
+        {
+        case kTfLiteInt32:
+            tflite::label_image::get_top_n<float32_t>(interpreter->typed_output_tensor<float32_t>(0), output_size, 1, threshold, &top_results, kTfLiteFloat32);
+            break;
+        case kTfLiteFloat32:
+            tflite::label_image::get_top_n<float32_t>(interpreter->typed_output_tensor<float32_t>(0), output_size, 1, threshold, &top_results, kTfLiteFloat32);
+            break;
+        case kTfLiteUInt8:
+            tflite::label_image::get_top_n<uint8_t>(interpreter->typed_output_tensor<uint8_t>(0), output_size, 1, threshold, &top_results, kTfLiteUInt8);
+            break;
+        case kTfLiteInt8:
+            tflite::label_image::get_top_n<uint8_t>(interpreter->typed_output_tensor<uint8_t>(0), output_size, 1, threshold, &top_results, kTfLiteUInt8);
+            break;
+        default:
+            fprintf(stderr, "cannot handle output type\n");
+            exit(1);
+        }
+        // printf("Top results:\n");
+        // for(const auto& result : top_results) {
+        //     printf("Value: %g, Index: %d\n", result.first, result.second);
+        // }
+
+        // Retrieve selected tensor values
+        if (myTensorType == kTfLiteUInt8 && numDims == 2) {
+            printf("Type of the selected tensor [%d]: kTfLiteUInt8\n", myTensorIndex);
+            // Retrieve output tensor values
+            uint8_t* tensor_data_ptr = interpreter->typed_tensor<uint8_t>(myTensorIndex);
+            // Print the some elements of the tensor
+            printf("Some elements of the tensor [%d]:\n", myTensorIndex);
+            for (int i = 500; i < 1000; i++) {
+                printf("tensor_data_ptr[%d]: %d\n", i, tensor_data_ptr[i]);
+            }
+        } else if (myTensorType == kTfLiteInt8 && numDims == 2) {
+            printf("Type of the selected tensor [%d]: kTfLiteInt8\n", myTensorIndex);
+            // Retrieve output tensor values
+            int8_t* tensor_data_ptr = interpreter->typed_tensor<int8_t>(myTensorIndex);
+            // Print the some elements of the tensor
+            printf("Some elements of the tensor [%d]:\n", myTensorIndex);
+            for (int i = 500; i < 1000; i++) {
+                printf("tensor_data_ptr[%d]: %d\n", i, tensor_data_ptr[i]);
+            }
+        } else if (myTensorType == kTfLiteFloat32 && numDims == 2) {
+            printf("Type of the selected tensor [%d]: kTfLiteFloat32\n", myTensorIndex);
+            // Retrieve output tensor values
+            float32_t* tensor_data_ptr = interpreter->typed_tensor<float32_t>(myTensorIndex);
+            // Save tensor to file
+            std::ofstream outputFile("/Users/kubotamacmini/Documents/cognitive_games/vectors.txt", std::ios::app);
+            if (outputFile.is_open()) {
+                for (int i = 0; i < numElements; i++) {
+                    if (myTensorType == kTfLiteFloat32) {
+                        outputFile << std::fixed << std::setprecision(6) << tensor_data_ptr[i] << " ";
+                    } else {
+                        outputFile << tensor_data_ptr[i] << " ";
+                    }
+                }
+                outputFile << "\n";
+                outputFile.close();
+                printf("Tensor saved to file: vectors.txt\n");
+            } else {
+                printf("Failed to open file: vectors.txt\n");
+            }
+            // Print the some elements of the tensor
+            // printf("Some elements of the tensor [%d]:\n", myTensorIndex);
+            // for (int i = 500; i < 1000; i++) {
+            //     printf("tensor_data_ptr[%d]: %f\n", i, tensor_data_ptr[i]);
+            // }
+        }
+
+        // Clean up the interpreter
+        interpreter->ResetVariableTensors();
         numIters += 1;
         printf("********** Iteration end ********** \n");
     }
@@ -1148,7 +1133,7 @@ int main(int argc, char **argv)
         cv::putText(frame, "Inference Time in ms: " + std::to_string(inference_time), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
 
         // Load Labels
-        auto labels = load_model_labels(labelFile);
+        auto labels = load_labels(labelFile);
 
         // Print labels with confidence in input image
         for (const auto &result : top_results)
@@ -1159,7 +1144,6 @@ int main(int argc, char **argv)
             std::string output_txt_2 = "Confidence : " + std::to_string(confidence);
             cv::putText(frame, output_txt_1, cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
             cv::putText(frame, output_txt_2, cv::Point(10, 90), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
-            break;
         }
 
         // Display image
