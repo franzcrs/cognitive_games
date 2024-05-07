@@ -414,6 +414,300 @@ int main(int argc, char* argv[]) {
 #include <cmath>
 #include <sstream>
 
+#include <signal.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <math.h>
+#include <pthread.h>
+#include <time.h>
+
+#define DID     22           //  Device ID (fixed)
+
+#define DEV     100         // The Number of Devices
+#define SCE     100         // The number of Scenarios
+#define GAM     100         // The number of Games
+
+
+int DeviceValid[DEV+1],     //  available devices
+    GameValid[GAM+1],     //  available games
+    ScenarioValid[SCE+1];         //  available scenarios
+
+// UDP  to get the Server IP Address - - - - - -
+
+#define BUFSIZE         8192
+#define ISS_UDP_PORT    9000    //  Port ID for UDP/IP ISS Database communication
+#define ISS_TCP_PORT    9866    //  ISS Database Server
+#define ISS_UDPR_PORT   9868    //  Port ID for UDP/IP ISS Database Receiver communication
+
+#define TIMEOUT_MS      5000    //  milliSeconds between retransmits
+
+char    ISS_ServerIP[30]="192.168.13.100",
+        buf[BUFSIZE];
+
+int     fin2=0,             //  1: game end (ready to start)
+        GameScore[GAM+1],
+        DeviceID=DID,       //  Device ID (000-999)
+        ISSstate=-1,      //  0: not connected, 1: connected
+        DeviceStage=0,      //  state to send to the ISS server
+        DeviceCommand=0,    // DeviceCommand to send to the ISS server
+        DeviceData=0,       //  state or value to send to the ISS server
+        DataSent=1,         //  0: ready to send, 1: sent
+        ScenarioStage=0,    //  Scenario Stage
+        ScenarioValue,      //  Scenario Value (data)
+        ScenarioStartTime;  //   Secnario Starting Time in Sec (00-59)
+
+int ISS_UDP_receive()    //  receive server (host) IP through UDP/IP ISS Database communication
+{
+    
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 100000;
+    
+    int i=0,sock;
+    struct sockaddr_in addr;
+    
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(ISS_UDP_PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_len = sizeof(addr);
+    
+    bind(sock, (struct sockaddr *)&addr, sizeof(addr));
+    memset(ISS_ServerIP, 0, sizeof(ISS_ServerIP));
+    recv(sock, ISS_ServerIP, sizeof(ISS_ServerIP), 0);
+    
+    printf("ISS Database Server IP %s\n", ISS_ServerIP);
+    close(sock);
+    return(i);
+}
+
+void init()     //  init for each scenario
+{
+    int i;
+    
+    fin2=1;     //  game end (ready to start)
+    DataSent=1;
+    DeviceID=DID;
+    DeviceStage=ScenarioStage;
+    DeviceCommand=0;
+    DeviceData=0;
+    
+    for (i=0; i<DEV; i++)
+        DeviceValid[i]=-1;     //  available devices
+    for (i=0; i<GAM; i++)
+        GameValid[i]=-1;     //  available games
+    for (i=0; i<SCE; i++)
+        ScenarioValid[i]=-1;         //  available scenarios
+    // printf("\n\n Data init is done. \n\n");
+}
+
+void senddata(){    // send state / DeviceCommand and data to the server
+    
+    char    sentdata[BUFSIZE],
+            codeno[BUFSIZE];      //   text to int
+    
+    struct sockaddr_in server;
+    unsigned long  dst_ip = inet_addr(ISS_ServerIP);
+    int port   = ISS_TCP_PORT;  //  database server
+    
+    int     h,  //  ID
+            i,j,k,s;
+    char    numberName[20]="01234567890";
+    
+    memset(sentdata, 0, sizeof(sentdata));
+    
+    if (DeviceID>=100){
+        k=(int)(DeviceID/100)%10;
+        sentdata[0]=numberName[k];   //  Device ID (000-999)
+    }
+    else
+        sentdata[0]=numberName[0];
+    if (DeviceID>=10){
+        k=(int)(DeviceID/10)%10;
+        sentdata[1]=numberName[k];
+    }
+    else
+        sentdata[1]=numberName[0];
+    k=DeviceID%10;
+    sentdata[2]=numberName[k];
+    
+    if (DeviceStage>=1000) {
+        k=(int)(DeviceStage/1000)%10;
+        sentdata[3]=numberName[k]; // State / stage ID (0000 - 9999)
+    }
+    else
+        sentdata[3]=numberName[0];
+    if (DeviceStage>=100) {
+        k=(int)(DeviceStage/100)%10;
+        sentdata[4]=numberName[k];
+    }
+    else
+        sentdata[4]=numberName[0];
+    if (DeviceStage>=10) {
+        k=(int)(DeviceStage/10)%10;
+        sentdata[5]=numberName[k];
+    }
+    else
+        sentdata[5]=numberName[0];
+    k=DeviceStage%10;
+    sentdata[6]=numberName[k];
+    
+    if (DeviceCommand>=10) {    //  send DeviceCommand data (00 - 99)
+        k=(int)(DeviceCommand/10)%10;
+        sentdata[7]=numberName[k]; // value ID
+    }
+    else
+        sentdata[7]=numberName[0]; // value ID
+    k=DeviceCommand%10;
+    sentdata[8]=numberName[k]; // value ID
+    
+    if (DeviceData>=10) {           //  send value  (00 - 99)
+        k=(int)(DeviceData/10)%10;
+        sentdata[9]=numberName[k]; // value ID
+    }
+    else
+        sentdata[9]=numberName[0]; // value ID
+    k=DeviceData%10;
+    sentdata[10]=numberName[k]; // value ID
+
+    
+    if ((s = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        printf("Fail to ISS Server\n");
+    }
+    else{
+        memset((char *) &server, 0, sizeof(server));
+        server.sin_family      = AF_INET;
+        server.sin_addr.s_addr = dst_ip;
+        server.sin_port        = htons(port);
+        if (connect(s, (struct sockaddr *) &server, sizeof server) < 0) {
+            printf(" Device [%d] No ISS Server - State:%d\n",
+                   DeviceID, DeviceStage);
+            ISSstate=0;
+        }
+        else{
+            write(s, sentdata, strlen(sentdata));   //  sending data
+            memset(buf, 0, sizeof(buf));
+            read(s, buf, sizeof(buf));  //  receiving data
+            close(s);
+            ISSstate=1;
+            
+            memset(codeno, 0, sizeof(codeno));
+            codeno[0]=buf[0];   //  Device State
+            codeno[1]=buf[1];   //  Device State
+            codeno[2]=buf[2];   //  Device State
+            codeno[3]=buf[3];   //  Device State
+            ScenarioStage=atoi(codeno);     //  Scenario State:
+            
+            memset(codeno, 0, sizeof(codeno));
+            codeno[0]=buf[4];   //  Device Value
+            codeno[1]=buf[5];   //  Device Value
+            codeno[2]=buf[6];   //  Device Value
+            codeno[3]=buf[7];  //  Device Value
+            
+            if ((ScenarioStage == 2)&&(ScenarioStage != DeviceStage))
+                init();
+            else if (ScenarioStage == 3){
+                ScenarioStartTime=atoi(codeno); // Starting Time in Sec (00-59)
+            }
+            else if (DeviceCommand == 15){
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[4];   //  Scenario ID
+                codeno[1]=buf[5];
+                h=atoi(codeno);     //  Scenario ID
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[6];   //  Scenario Valid
+                codeno[1]=buf[7];
+                ScenarioValid[h]=atoi(codeno);     //  Scenario Valid
+                printf("- - The previous Game [%d] Score: %d\n",
+                       h,ScenarioValid[h]);
+            }
+            else if (DeviceCommand == 16){
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[4];   //  Scenario ID
+                codeno[1]=buf[5];
+                h=atoi(codeno);     //  Scenario ID
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[6];   //  Scenario Valid
+                codeno[1]=buf[7];
+                ScenarioValid[h]=atoi(codeno);     //  Scenario Valid
+                printf("- - Total Scenario [%d] Score: %d\n",
+                       h,ScenarioValid[h]);
+            }
+            else if (DeviceCommand == 20){
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[4];   //  Scenario ID
+                codeno[1]=buf[5];
+                h=atoi(codeno);     //  Scenario ID
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[6];   //  Scenario Valid
+                codeno[1]=buf[7];
+                ScenarioValid[h]=atoi(codeno);     //  Scenario Valid
+                printf("Scenario[%d] avaialble: %d\n",
+                       h,ScenarioValid[h]);
+            }
+            else if (DeviceCommand == 21){
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[4];   //  Game ID
+                codeno[1]=buf[5];
+                h=atoi(codeno);     //  Game ID
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[6];   //  Game Valid
+                codeno[1]=buf[7];
+                GameValid[h]=atoi(codeno);     //  Scenario Valid
+                printf("Game[%d] avaialble: %d\n",
+                       h,GameValid[h]);
+            }
+            else if (DeviceCommand == 22){
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[4];   //  Device ID
+                codeno[1]=buf[5];
+                h=atoi(codeno);     //  Device ID
+                memset(codeno, 0, sizeof(codeno));
+                codeno[0]=buf[6];   //  Device Valid
+                codeno[1]=buf[7];
+                DeviceValid[h]=atoi(codeno);     //  Scenario Valid
+                printf("Device[%d] avaialble: %d\n",
+                       h,DeviceValid[h]);
+            }
+            else
+                ScenarioValue=atoi(codeno);          //  Scenario Value (data)
+        }
+    }
+    if (DataSent==0){
+        printf("sent: %s\n", sentdata);
+        DeviceCommand=0;    //  reset
+        DeviceData=0;       //  reset
+        DataSent=1;
+    }
+}
+
+
+void* iss( void* args ) // Sensor Node
+{
+    int fin=0, l=0, m=0, n=0,
+        i,j,k,t;
+
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 400000000;     // 0.4 msec Coomunication Time Interval
+        
+    k=0;
+    while(fin<2){
+//        if (DataSent==0){
+//            printf("[%d] ID:%d, State:%d Data:%d \n",
+//                   k, DeviceID, DeviceStage, DeviceData);
+//            k++;
+//        }
+        senddata();
+        nanosleep(&ts, NULL);
+    }
+    return NULL;
+}
+
 #define TFLITE_MINIMAL_CHECK(x)                              \
   if (!(x)) {                                                \
     fprintf(stderr, "Error at %s:%d\n", __FILE__, __LINE__); \
@@ -507,18 +801,18 @@ std::vector<std::vector<double>> calculate_centroids(const std::vector<std::stri
 
 std::pair<int, std::string> find_similar_class(const std::vector<double>& new_feature_vector, std::vector<std::vector<double>>& centroids_per_cluster, const std::vector<std::string>& class_labels, const std::string& similarity_type = "cosine") {
     std::vector<double> new_node_attributes;
-    printf("New node attributes initialized\n");
     int index = 0;
+    // printf("Calculating current frame similarity values\n");
     for (const std::vector<double>& centroid_vector : centroids_per_cluster) {
         double new_node_attribute = compute_new_node_attribute(new_feature_vector, centroid_vector, similarity_type);
         new_node_attributes.push_back(new_node_attribute);
-        printf("Calculating new node's attribute w.r.t. cluster: %s\n", class_labels[index].c_str());
+        // printf("Calculating new node's attribute w.r.t. cluster: %s\n", class_labels[index].c_str());
         index += 1;
     }
-    printf("Classifying ...\n");
+    // printf("Classifying ...\n");
     int class_index = std::distance(new_node_attributes.begin(), std::min_element(new_node_attributes.begin(), new_node_attributes.end()));
-    printf("Class index: %d\n", class_index);
-    printf("Class label: %s\n", class_labels[class_index].c_str());
+    // printf("Class index: %d\n", class_index);
+    printf("Current frame class: %s\n", class_labels[class_index].c_str());
     return std::make_pair(class_index, class_labels[class_index]);
 }
 
@@ -547,89 +841,67 @@ void onTrackbarChange(int sliderValue, void* userdata) {
 
 int main(int argc, char **argv)
 {
-
-    // Get Model label and input image
-    // if (argc != 4)
-    // {
-    //     fprintf(stderr, "Run as: ./main modelfile labels image\n");
-    //     exit(1);
-    // }
-    // const char *modelFileName = argv[1];
-    // const char *labelFile = argv[2];
-    // const char *imageFile = argv[3];
-
+    // Get Model, label and input image
     const char *modelFileName = "/Users/kubotamacmini/Documents/cognitive_games/mobilenet_v3small-075-224-feature-vector.tflite";
     const char *labelFile = "/Users/kubotamacmini/Documents/cognitive_games/efficientnet_labels.txt";
     const char *imageFile = "camera";
 
+    // Clusters data files
     std::vector<std::string> clusters_files_path = {
         "/Users/kubotamacmini/Documents/cognitive_games/L_vectors.txt",
+        "/Users/kubotamacmini/Documents/cognitive_games/L_2_vectors.txt",
+        "/Users/kubotamacmini/Documents/cognitive_games/L_3_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/C_vectors.txt",
+        "/Users/kubotamacmini/Documents/cognitive_games/C_2_vectors.txt",
+        "/Users/kubotamacmini/Documents/cognitive_games/C_3_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/None_vectors.txt",
-        "/Users/kubotamacmini/Documents/cognitive_games/None_letter_vectors.txt"
+        "/Users/kubotamacmini/Documents/cognitive_games/None_letter_vectors.txt",
+        "/Users/kubotamacmini/Documents/cognitive_games/None_letter_2_vectors.txt",
+        "/Users/kubotamacmini/Documents/cognitive_games/None_bg_vectors.txt"
     };
     std::vector<std::string> class_labels = {
         "L",
+        "L",
+        "L",
         "C",
+        "C",
+        "C",
+        "None",
+        "None",
         "None",
         "None"
     };
     std::string centroid_type = "mean";// In the meantime only mean is supported
     std::string similarity_type = "cosine";//"euclidean";
     std::vector<std::vector<double>> centroid_per_cluster = calculate_centroids(clusters_files_path, centroid_type, similarity_type);
+    printf("Clusters Centroids calculated\n");
 
+    // Camera activation and image loading
     std::vector<std::string> paths;
     bool readFromCamera = false;
-    // Check if imageFile is a file or a folder
-    if (std::filesystem::is_regular_file(imageFile))
-    {
-        // imageFile is a file
-        paths.push_back(imageFile);
-        printf("Image file path loaded \n");
-    }
-    else if (std::filesystem::is_directory(imageFile))
-    {
-        // imageFile is a folder
-        for (const auto &entry : std::filesystem::directory_iterator(imageFile))
-        {
-            if (entry.is_regular_file() && entry.path().extension() == ".jpg")
-            {
-                paths.push_back(entry.path().string());
-            }
-        }
-        printf("Image file paths contained in folder loaded \n");
-    }
-    else
-    {
-        // imageFile does not exist or is neither a file nor a folder
-        fprintf(stderr, "Invalid image file or folder. Changing to camera source.\n");
-        paths.push_back("/Users/kubotamacmini/Documents/cognitive_games/apple_above.jpg");
-        readFromCamera = true;
-    }
-    
+    paths.push_back("/Users/kubotamacmini/Documents/cognitive_games/apple_above.jpg");
+    readFromCamera = true;
     // Open the default camera
     cv::VideoCapture cap(0);
     if (readFromCamera && !cap.isOpened()) { // Check if the camera opened successfully
         std::cerr << "Error: Unable to open camera" << std::endl;
         return -1;
     }
+    printf("Camera opened\n");
 
-    // Load Model
+    // Classificationn model set up
     std::unique_ptr<tflite::FlatBufferModel> model = tflite::FlatBufferModel::BuildFromFile(modelFileName);
     TFLITE_MINIMAL_CHECK(model != nullptr);
     printf("Model loaded \n");
-
     // Initiate Interpreter
     tflite::ops::builtin::BuiltinOpResolver resolver;
     std::unique_ptr<tflite::Interpreter> interpreter;
     tflite::InterpreterBuilder(*model.get(), resolver)(&interpreter); //op: tflite::InterpreterBuilder(*model, resolver)(&interpreter);
     TFLITE_MINIMAL_CHECK(interpreter != nullptr);
     printf("Interpreter initiated \n");
-
     // Configure the interpreter
     // interpreter->SetAllowFp16PrecisionForFp32(true);
     interpreter->SetNumThreads(-1);
-
     // Choose a tensor from model by a tensor index
     /* Using mobilenet_v3small-075 class
     lite0-uint8
@@ -851,11 +1123,6 @@ int main(int argc, char **argv)
     TfLiteTensor* myTensor = interpreter->tensor(myTensorIndex);
     // Get the number of dimensions in the tensor
     int numDims = myTensor->dims->size;
-    // Print the number of dimensions in the tensor
-    printf("Number of dimensions in the tensor [%d]: %d\n", myTensorIndex, numDims);
-    if (numDims > 2) {
-        printf("Tensor is not 2D. Feature vector values will not be shown. \nMost probably you have selected a classification mobilenet model instead of the features version\n");
-    }
     // Get the number of elements in the tensor
     int numElements = 1;
     std::vector<int> tensorShape;    
@@ -864,8 +1131,6 @@ int main(int argc, char **argv)
         tensorShape.push_back(myTensor->dims->data[i]);
         // printf("Dimension %d: %d\n", i, myTensor->dims->data[i]);
     }
-    // Print the number of elements in the tensor
-    // printf("Number of elements in the tensor: [%d]: %d\n", myTensorIndex, numElements);
     // Get the type of the tensor
     TfLiteType myTensorType = myTensor->type;
     int unit_memory = 1;
@@ -883,91 +1148,138 @@ int main(int argc, char **argv)
             fprintf(stderr, "cannot handle input type\n");
             exit(1);
     }
-    // Set custom allocation for tensor of index tensorIndex
-    // interpreter->SetTensorParametersReadWrite(myTensorIndex, myTensorType, "MyTensor", tensorShape, {607000, 607000+unit_memory*numElements});
-    // printf("Tensor [%d] set to custom allocation \n", myTensorIndex);
 
-    // Run inferences for all images in the paths vector
-    auto inference_time = 0; // One interation inference time
+    // Inference set up
     std::vector<std::pair<float, int>> top_results; // Output tensor values
     float threshold = 0.1f; // Threshold for output tensor values
+    // Allocate tensor buffers.
+    TFLITE_MINIMAL_CHECK(interpreter->AllocateTensors() == kTfLiteOk);
+    // Get Input Tensor Dimensions
+    int input = interpreter->inputs()[0];
+    auto height = interpreter->tensor(input)->dims->data[1];
+    auto width = interpreter->tensor(input)->dims->data[2];
+    auto channels = interpreter->tensor(input)->dims->data[3];
+    // printf("Model input height, width, channels = %d, %d, %d \n", height, width, channels);
 
-    cv::Mat frame; // Placeholder for the current frame
+    // Placeholder for the current frame and properties
+    cv::Mat frame; 
     frame = cv::imread(paths[0]);
+    TFLITE_MINIMAL_CHECK(!frame.empty());
+    if (!readFromCamera) printf("Placeholder image loaded from %s \n", paths[0].c_str());
     float cropProportionHeight = 0.7f;//0.9f; // Proportion of height to keep
     float cropProportionWidth = 0.5f;//0.6f; // Proportion of width to keep
     int frameHeight = frame.rows;
     int frameWidth = frame.cols;
     int cropHeight = static_cast<int>(frameHeight * cropProportionHeight);
     int cropWidth = static_cast<int>(frameWidth * cropProportionWidth);
-    int numIters = 0; // Number of iterations
-    for (const auto& imagePath : paths) {
-        printf("********** Iteration start ********** \n");
-        // Allocate tensor buffers.
-        TFLITE_MINIMAL_CHECK(interpreter->AllocateTensors() == kTfLiteOk);
-        // printf("Interpreter Tensors could be allocated \n");
 
-        // Get Input Tensor Dimensions
-        int input = interpreter->inputs()[0];
-        auto height = interpreter->tensor(input)->dims->data[1];
-        auto width = interpreter->tensor(input)->dims->data[2];
-        auto channels = interpreter->tensor(input)->dims->data[3];
-        // printf("Model input height, width, channels = %d, %d, %d \n", height, width, channels);
-        
-        // Load Input Image
-        frame = cv::imread(imagePath);
-        TFLITE_MINIMAL_CHECK(!frame.empty());
-        if (!readFromCamera) printf("Image loaded from %s \n", imagePath.c_str());
-        int sliderOffsetX = 29;//35; // Slider value for X offset
-        int storedOffsetX = sliderOffsetX;//35; // Slider value for X offset
-        int sliderOffsetY = 22;//0; // Slider value for Y offset
-        int storedOffsetY = sliderOffsetY;//0; // Slider value for Y offset
-        int maxSliderValueX = int((1.0-cropProportionWidth)*100); // Maximum slider value for X offset
-        int maxSliderValueY = int((1.0-cropProportionHeight)*100); // Maximum slider value for Y offset
-        float addOffsetX = storedOffsetX / 100.0;
-        float addOffsetY = storedOffsetY / 100.0;
-        cv::namedWindow("Frame", cv::WINDOW_NORMAL);
-        cv::String trackbarNameX = "Offset X:";
-        cv::String trackbarNameY = "Offset Y:";
-        cv::createTrackbar(trackbarNameX, "Frame", &sliderOffsetX, maxSliderValueX, onTrackbarChange, &storedOffsetX);
-        cv::createTrackbar(trackbarNameY, "Frame", &sliderOffsetY, maxSliderValueY, onTrackbarChange, &storedOffsetY);
+    // Interface setup
+    int sliderOffsetX = 29;//35; // Slider value for X offset
+    int storedOffsetX = sliderOffsetX;//35; // Slider value for X offset
+    int sliderOffsetY = 22;//0; // Slider value for Y offset
+    int storedOffsetY = sliderOffsetY;//0; // Slider value for Y offset
+    int maxSliderValueX = int((1.0-cropProportionWidth)*100); // Maximum slider value for X offset
+    int maxSliderValueY = int((1.0-cropProportionHeight)*100); // Maximum slider value for Y offset
+    float addOffsetX = storedOffsetX / 100.0;
+    float addOffsetY = storedOffsetY / 100.0;
+    cv::namedWindow("Frame", cv::WINDOW_NORMAL);
+    cv::String trackbarNameX = "Offset X:";
+    cv::String trackbarNameY = "Offset Y:";
+    cv::createTrackbar(trackbarNameX, "Frame", &sliderOffsetX, maxSliderValueX, onTrackbarChange, &storedOffsetX);
+    cv::createTrackbar(trackbarNameY, "Frame", &sliderOffsetY, maxSliderValueY, onTrackbarChange, &storedOffsetY);
+    int sliderValueShadow = 0; // Slider value for shadow reduction
+    int storedValueShadow = sliderValueShadow; // Slider value for shadow reduction
+    int sliderValueSaturation = 12; // Slider value for saturation
+    int storedValueSaturation = sliderValueSaturation; // Slider value for saturation
+    int maxSliderValueShadow = 200; // Maximum slider value for shadow reduction
+    int maxSliderValueSaturation = 100; // Maximum slider value for saturation
+    int sliderValueMultiply = 135;//148;//180;//260; // Slider value for multiply effect
+    int storedValueMultiply = sliderValueMultiply; // Slider value for multiply effect
+    int maxSliderValueMultiply = 800; // Maximum slider value for multiply effect
+    cv::String trackbarNameShadow = "Shadows:";
+    cv::String trackbarNameSaturation = "Saturation:";
+    cv::createTrackbar(trackbarNameShadow, "Frame", &sliderValueShadow, maxSliderValueShadow, onTrackbarChange, &storedValueShadow);
+    cv::createTrackbar(trackbarNameSaturation, "Frame", &sliderValueSaturation, maxSliderValueSaturation, onTrackbarChange, &storedValueSaturation);
+    cv::String trackbarNameMultiply = "Multiply:";
+    cv::createTrackbar(trackbarNameMultiply, "Frame", &sliderValueMultiply, maxSliderValueMultiply, onTrackbarChange, &storedValueMultiply);
 
-        int sliderValueShadow = 0; // Slider value for shadow reduction
-        int storedValueShadow = sliderValueShadow; // Slider value for shadow reduction
-        int sliderValueSaturation = 12; // Slider value for saturation
-        int storedValueSaturation = sliderValueSaturation; // Slider value for saturation
-        int maxSliderValueShadow = 200; // Maximum slider value for shadow reduction
-        int maxSliderValueSaturation = 100; // Maximum slider value for saturation
-        int sliderValueMultiply = 135;//148;//180;//260; // Slider value for multiply effect
-        int storedValueMultiply = sliderValueMultiply; // Slider value for multiply effect
-        int maxSliderValueMultiply = 800; // Maximum slider value for multiply effect
-        cv::String trackbarNameShadow = "Shadows:";
-        cv::String trackbarNameSaturation = "Saturation:";
-        cv::createTrackbar(trackbarNameShadow, "Frame", &sliderValueShadow, maxSliderValueShadow, onTrackbarChange, &storedValueShadow);
-        cv::createTrackbar(trackbarNameSaturation, "Frame", &sliderValueSaturation, maxSliderValueSaturation, onTrackbarChange, &storedValueSaturation);
-        cv::String trackbarNameMultiply = "Multiply:";
-        cv::createTrackbar(trackbarNameMultiply, "Frame", &sliderValueMultiply, maxSliderValueMultiply, onTrackbarChange, &storedValueMultiply);
-        bool inferenceButtonPressed = false;
-        while (true) {
-            // Allocate tensor buffers.
-            TFLITE_MINIMAL_CHECK(interpreter->AllocateTensors() == kTfLiteOk);
-            // Clone the frame and draw the rectangle of the region to be cropped
-            cv::Mat frame_loop;// = frame.clone();
+    // Game variables set up
+    auto user_time = 0;
+    int user_score = 0;
+    bool correct_ans = false;
+    std::chrono::steady_clock::time_point challenge_start_time, challenge_end_time;
+    bool game_start_flag = false;
+    bool challenge_start_flag;
+    ScenarioStage = 0000;
+    DeviceCommand = 00;
+    DeviceData = 00;
+    DeviceStage = 0002;
+    printf("Game variables set up\n");
+
+    // Communication set up
+    int fin=0;
+    ISS_UDP_receive();
+    ISSstate=-1;        //  not started
+    pthread_t tid1;   // Thread ID
+    pthread_create(&tid1, NULL, iss, (void *)NULL);
+    printf("Communication set up\n");
+    printf("First Connection attempted\n");
+
+    bool app_start_flag = true;
+    // Application loop
+    while (app_start_flag){
+        // Communication set up
+        // ISS_UDP_receive();
+        // Initialize game variables
+        user_time = 0;
+        user_score = 0;
+        correct_ans = false;
+        game_start_flag = false;
+        challenge_start_flag = false;
+        ScenarioStage = 0000;
+        DeviceCommand = 00;
+        DeviceData = 00;
+        DeviceStage = 0002;
+        // Open the default camera
+        cv::VideoCapture cap(0);
+        if (readFromCamera && !cap.isOpened()) { // Check if the camera opened successfully
+            std::cerr << "Error: Unable to open camera" << std::endl;
+            return -1;
+        }
+        if (ScenarioStage == 0002){
+            DeviceCommand = 00;
+            DeviceData = 00;
+            DeviceStage = 0002;
+            // Send
+            printf("Received: %d. Returning same Scenario Stage\n", ScenarioStage);
+        }
+        else if (ScenarioStage == 3101){
+            DeviceCommand = 06;
+            DeviceData = 31;
+            DeviceStage = 3102;
+            game_start_flag = true;
+            // Send
+            printf("Received: %d. Starting Game\n", ScenarioStage);
+        }
+        while (game_start_flag){
+            printf("Game running...\n");
+            // Frame to use in loop
+            cv::Mat frame_loop_init;
             // Get frame from camera
-            if (readFromCamera) cap.read(frame_loop);
+            if (readFromCamera) cap.read(frame_loop_init);
             // Rotate frame_loop
-            cv::rotate(frame_loop, frame_loop, cv::ROTATE_180);
+            cv::rotate(frame_loop_init, frame_loop_init, cv::ROTATE_180);
             // Zoom in frame_loop
             cv::Mat zoomed_frame_loop;
-            cv::resize(frame_loop, zoomed_frame_loop, cv::Size(), 1.5, 1.5, cv::INTER_LINEAR);
-            frame_loop = zoomed_frame_loop(cv::Rect((zoomed_frame_loop.cols - frame_loop.cols) / 2, (zoomed_frame_loop.rows - frame_loop.rows) / 2, frame_loop.cols, frame_loop.rows));
-            if (readFromCamera && frame_loop.empty()) {
+            cv::resize(frame_loop_init, zoomed_frame_loop, cv::Size(), 1.5, 1.5, cv::INTER_LINEAR);
+            frame_loop_init = zoomed_frame_loop(cv::Rect((zoomed_frame_loop.cols - frame_loop_init.cols) / 2, (zoomed_frame_loop.rows - frame_loop_init.rows) / 2, frame_loop_init.cols, frame_loop_init.rows));
+            if (readFromCamera && frame_loop_init.empty()) {
                 printf("Failed to capture frame from camera\n");
                 return -1;
             }
             // Apply shadow reduction
             cv::Mat frame_loop_shadow;
-            cv::addWeighted(frame_loop, 1.0, cv::Scalar(storedValueShadow - maxSliderValueShadow/2), 0.0, 0.0, frame_loop_shadow);
+            cv::addWeighted(frame_loop_init, 1.0, cv::Scalar(storedValueShadow - maxSliderValueShadow/2), 0.0, 0.0, frame_loop_shadow);
             // Apply saturation
             cv::Mat frame_loop_saturation;
             cv::cvtColor(frame_loop_shadow, frame_loop_saturation, cv::COLOR_BGR2HSV);
@@ -978,182 +1290,302 @@ int main(int argc, char **argv)
             // Apply multiply effect
             cv::Mat frame_loop_multiply;
             cv::cvtColor(frame_loop_saturation, frame_loop_multiply, cv::COLOR_HSV2BGR);
-            cv::multiply(frame_loop_multiply, cv::Scalar(storedValueMultiply / 100.0, storedValueMultiply / 100.0, storedValueMultiply / 100.0), frame_loop);
+            cv::multiply(frame_loop_multiply, cv::Scalar(storedValueMultiply / 100.0, storedValueMultiply / 100.0, storedValueMultiply / 100.0), frame_loop_init);
             addOffsetX = (storedOffsetX - maxSliderValueX/2) / 100.0;
             addOffsetY = (storedOffsetY - maxSliderValueY/2) / 100.0;
             int cropOffsetX = int(((frameWidth - cropWidth) / 2) + addOffsetX*frameWidth);
             int cropOffsetY = int(((frameHeight - cropHeight) / 2) + addOffsetY*frameHeight);
-            cv::Mat frame_loop_wrect = frame_loop.clone();
+            cv::Mat frame_loop_wrect = frame_loop_init.clone();
             cv::rectangle(frame_loop_wrect, cv::Point(cropOffsetX, cropOffsetY), cv::Point(cropOffsetX + cropWidth, cropOffsetY + cropHeight), cv::Scalar(0, 255, 0), 2);
-
-            frame = frame_loop;
-            // Crop region
-            cv::Rect cropRegion(cropOffsetX, cropOffsetY, cropWidth, cropHeight);
-            // Crop frame
-            frame = frame(cropRegion);
-            
-            // Crop the corners of the image in the shape of triangles
-            cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
-            cv::Point pts[4][3];
-            pts[0][0] = cv::Point(0, 0);
-            pts[0][1] = cv::Point(0, int(cropHeight/5));
-            pts[0][2] = cv::Point(cropWidth/6, 0);
-            pts[1][0] = cv::Point(cropWidth, 0);
-            pts[1][1] = cv::Point(cropWidth, cropHeight/5);
-            pts[1][2] = cv::Point(cropWidth - cropWidth/6, 0);
-            pts[2][0] = cv::Point(0, cropHeight);
-            pts[2][1] = cv::Point(0, cropHeight - cropHeight/5);
-            pts[2][2] = cv::Point(cropWidth/6, cropHeight);
-            pts[3][0] = cv::Point(cropWidth, cropHeight);
-            pts[3][1] = cv::Point(cropWidth, cropHeight - cropHeight/5);
-            pts[3][2] = cv::Point(cropWidth - cropWidth/6, cropHeight);
-            std::vector<cv::Point> poly1 = {pts[0][0], pts[0][1], pts[0][2]};
-            std::vector<cv::Point> poly2 = {pts[1][0], pts[1][1], pts[1][2]};
-            std::vector<cv::Point> poly3 = {pts[2][0], pts[2][1], pts[2][2]};
-            std::vector<cv::Point> poly4 = {pts[3][0], pts[3][1], pts[3][2]};
-            std::vector<std::vector<cv::Point>> polygons = {poly1, poly2, poly3, poly4};
-            cv::fillPoly(mask, polygons, cv::Scalar(255));
-            frame.setTo(cv::Scalar(0), mask);
-
-            // Copy image to input tensor size
-            cv::Mat image;
-            cv::resize(frame, image, cv::Size(width, height), cv::INTER_NEAREST);
-            // printf("Image resized to %dx%d \n", width, height);
-            if (myTensorIndex>220){
-                // Normalize image from 0 to 1
-                image.convertTo(image, CV_32F, 1.0 / 255.0);
-            }
-            switch (interpreter->tensor(input)->type)
-            {
-            case kTfLiteFloat32:
-                memcpy(interpreter->typed_input_tensor<float32_t>(0), image.data, image.total() * image.elemSize());
-                break;
-            case kTfLiteUInt8:
-                memcpy(interpreter->typed_input_tensor<uint8_t>(0), image.data, image.total() * image.elemSize());
-                break;
-            case kTfLiteInt8:
-                memcpy(interpreter->typed_input_tensor<uint8_t>(0), image.data, image.total() * image.elemSize());
-                break;
-            default:
-                fprintf(stderr, "cannot handle input type\n");
-                exit(1);
-            }
-            // printf("Image copied to first input tensor\n");
-
-            // Inference
-            std::chrono::steady_clock::time_point start, end;
-            start = std::chrono::steady_clock::now();
-            TFLITE_MINIMAL_CHECK(interpreter->Invoke() == kTfLiteOk);//interpreter->Invoke();
-            end = std::chrono::steady_clock::now();
-            inference_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-            // printf("End of inference. Inference time : %s \n", std::to_string(inference_time).c_str());
-
-            // Get Output tensor index
-            int output = interpreter->outputs()[0];
-            TfLiteIntArray *output_dims = interpreter->tensor(output)->dims;
-            auto output_size = output_dims->data[output_dims->size - 1];
-            // Get the model classificaiton results
-            // std::vector<std::pair<float, int>> top_results;
-            // float threshold = 0.01f;
-            switch (interpreter->tensor(output)->type)
-            {
-            case kTfLiteInt32:
-                tflite::label_image::get_top_n<float32_t>(interpreter->typed_output_tensor<float32_t>(0), output_size, 1, threshold, &top_results, kTfLiteFloat32);
-                break;
-            case kTfLiteFloat32:
-                tflite::label_image::get_top_n<float32_t>(interpreter->typed_output_tensor<float32_t>(0), output_size, 1, threshold, &top_results, kTfLiteFloat32);
-                break;
-            case kTfLiteUInt8:
-                tflite::label_image::get_top_n<uint8_t>(interpreter->typed_output_tensor<uint8_t>(0), output_size, 1, threshold, &top_results, kTfLiteUInt8);
-                break;
-            case kTfLiteInt8:
-                tflite::label_image::get_top_n<uint8_t>(interpreter->typed_output_tensor<uint8_t>(0), output_size, 1, threshold, &top_results, kTfLiteUInt8);
-                break;
-            default:
-                fprintf(stderr, "cannot handle output type\n");
-                exit(1);
-            }
-
-            // Vector to save the tensor values
-            std::vector<double> tensor_vector;
-            // Retrieve selected tensor values
-            if (myTensorType == kTfLiteUInt8 && numDims == 2) {
-                printf("Type of the selected tensor [%d]: kTfLiteUInt8\n", myTensorIndex);
-                // Retrieve output tensor values
-                uint8_t* tensor_data_ptr = interpreter->typed_tensor<uint8_t>(myTensorIndex);
-                // Print the some elements of the tensor
-                printf("Some elements of the tensor [%d]:\n", myTensorIndex);
-                for (int i = 500; i < 1000; i++) {
-                    printf("tensor_data_ptr[%d]: %d\n", i, tensor_data_ptr[i]);
-                }
-            } else if (myTensorType == kTfLiteInt8 && numDims == 2) {
-                printf("Type of the selected tensor [%d]: kTfLiteInt8\n", myTensorIndex);
-                // Retrieve output tensor values
-                int8_t* tensor_data_ptr = interpreter->typed_tensor<int8_t>(myTensorIndex);
-                // Print the some elements of the tensor
-                printf("Some elements of the tensor [%d]:\n", myTensorIndex);
-                for (int i = 500; i < 1000; i++) {
-                    printf("tensor_data_ptr[%d]: %d\n", i, tensor_data_ptr[i]);
-                }
-            } else if (myTensorType == kTfLiteFloat32 && numDims == 2) {
-                // printf("Type of the selected tensor [%d]: kTfLiteFloat32\n", myTensorIndex);
-                // Retrieve output tensor values
-                float32_t* tensor_data_ptr = interpreter->typed_tensor<float32_t>(myTensorIndex);
-                for (int i = 0; i < numElements; i++) {
-                    tensor_vector.push_back(tensor_data_ptr[i]);
-                }
-                // std::ofstream outputFile("/Users/kubotamacmini/Documents/cognitive_games/curr_vector.txt", std::ios::app);
-                // if (outputFile.is_open()) {
-                //     for (int i = 0; i < numElements; i++) {
-                //         if (myTensorType == kTfLiteFloat32) {
-                //             outputFile << std::fixed << std::setprecision(6) << tensor_data_ptr[i] << " ";
-                //         } else {
-                //             outputFile << tensor_data_ptr[i] << " ";
-                //         }
-                //     }
-                //     outputFile << "\n";
-                //     outputFile.close();
-                //     // printf("Tensor saved to file: curr_vector.txt\n");
-                // } else {
-                //     printf("Failed to open file: curr_vector.txt\n");
-                // }
-            }
-            // Classify the image features vector
-            std::pair<int, std::string> similar_class = find_similar_class(tensor_vector, centroid_per_cluster, class_labels);
-
-            cv::putText(frame_loop_wrect, "Figure recognized as "+similar_class.second, cv::Point(0.45*frameWidth , 0.9*frameHeight), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 2);
             cv::imshow("Frame", frame_loop_wrect);
 
+            if (ScenarioStage == 3103){
+                challenge_start_flag = true;
+                challenge_start_time = std::chrono::steady_clock::now();
+                printf("Received: %d. Challenge starting\n", ScenarioStage);
+            }
+            else if(ScenarioStage == 3105){
+                DeviceCommand = 8;
+                DeviceData = 00;
+                DeviceStage = 0004;
+                // Send
+                game_start_flag = false;
+                printf("Received: %d. Game finishing\n", ScenarioStage);
+            }
+            // Inference Loop
+            std::vector<std::string> class_verification_list;
+            while (challenge_start_flag){
+                // Allocate tensor buffers.
+                TFLITE_MINIMAL_CHECK(interpreter->AllocateTensors() == kTfLiteOk);
 
-            // Clean up the interpreter
-            interpreter->ResetVariableTensors();
+                // Clone the frame and draw the rectangle of the region to be cropped
+                cv::Mat frame_loop;// = frame.clone();
+                // Get frame from camera
+                if (readFromCamera) cap.read(frame_loop);
+                // Rotate frame_loop
+                cv::rotate(frame_loop, frame_loop, cv::ROTATE_180);
+                // Zoom in frame_loop
+                cv::Mat zoomed_frame_loop;
+                cv::resize(frame_loop, zoomed_frame_loop, cv::Size(), 1.5, 1.5, cv::INTER_LINEAR);
+                frame_loop = zoomed_frame_loop(cv::Rect((zoomed_frame_loop.cols - frame_loop.cols) / 2, (zoomed_frame_loop.rows - frame_loop.rows) / 2, frame_loop.cols, frame_loop.rows));
+                if (readFromCamera && frame_loop.empty()) {
+                    printf("Failed to capture frame from camera\n");
+                    return -1;
+                }
+                // Apply shadow reduction
+                cv::Mat frame_loop_shadow;
+                cv::addWeighted(frame_loop, 1.0, cv::Scalar(storedValueShadow - maxSliderValueShadow/2), 0.0, 0.0, frame_loop_shadow);
+                // Apply saturation
+                cv::Mat frame_loop_saturation;
+                cv::cvtColor(frame_loop_shadow, frame_loop_saturation, cv::COLOR_BGR2HSV);
+                std::vector<cv::Mat> channels;
+                cv::split(frame_loop_saturation, channels);
+                channels[1] = channels[1] * ((storedValueSaturation) / 100.0);
+                cv::merge(channels, frame_loop_saturation);
+                // Apply multiply effect
+                cv::Mat frame_loop_multiply;
+                cv::cvtColor(frame_loop_saturation, frame_loop_multiply, cv::COLOR_HSV2BGR);
+                cv::multiply(frame_loop_multiply, cv::Scalar(storedValueMultiply / 100.0, storedValueMultiply / 100.0, storedValueMultiply / 100.0), frame_loop);
+                addOffsetX = (storedOffsetX - maxSliderValueX/2) / 100.0;
+                addOffsetY = (storedOffsetY - maxSliderValueY/2) / 100.0;
+                int cropOffsetX = int(((frameWidth - cropWidth) / 2) + addOffsetX*frameWidth);
+                int cropOffsetY = int(((frameHeight - cropHeight) / 2) + addOffsetY*frameHeight);
+                cv::Mat frame_loop_wrect = frame_loop.clone();
+                cv::rectangle(frame_loop_wrect, cv::Point(cropOffsetX, cropOffsetY), cv::Point(cropOffsetX + cropWidth, cropOffsetY + cropHeight), cv::Scalar(0, 255, 0), 2);
 
-            // break;
-            
+                frame = frame_loop;
+                // Crop region
+                cv::Rect cropRegion(cropOffsetX, cropOffsetY, cropWidth, cropHeight);
+                // Crop frame
+                frame = frame(cropRegion);
+                
+                // Crop the corners of the image in the shape of triangles
+                cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+                cv::Point pts[4][3];
+                pts[0][0] = cv::Point(0, 0);
+                pts[0][1] = cv::Point(0, int(cropHeight/5));
+                pts[0][2] = cv::Point(cropWidth/6, 0);
+                pts[1][0] = cv::Point(cropWidth, 0);
+                pts[1][1] = cv::Point(cropWidth, cropHeight/5);
+                pts[1][2] = cv::Point(cropWidth - cropWidth/6, 0);
+                pts[2][0] = cv::Point(0, cropHeight);
+                pts[2][1] = cv::Point(0, cropHeight - cropHeight/5);
+                pts[2][2] = cv::Point(cropWidth/6, cropHeight);
+                pts[3][0] = cv::Point(cropWidth, cropHeight);
+                pts[3][1] = cv::Point(cropWidth, cropHeight - cropHeight/5);
+                pts[3][2] = cv::Point(cropWidth - cropWidth/6, cropHeight);
+                std::vector<cv::Point> poly1 = {pts[0][0], pts[0][1], pts[0][2]};
+                std::vector<cv::Point> poly2 = {pts[1][0], pts[1][1], pts[1][2]};
+                std::vector<cv::Point> poly3 = {pts[2][0], pts[2][1], pts[2][2]};
+                std::vector<cv::Point> poly4 = {pts[3][0], pts[3][1], pts[3][2]};
+                std::vector<std::vector<cv::Point>> polygons = {poly1, poly2, poly3, poly4};
+                cv::fillPoly(mask, polygons, cv::Scalar(255));
+                frame.setTo(cv::Scalar(0), mask);
+
+                // Copy image to input tensor size
+                cv::Mat image;
+                cv::resize(frame, image, cv::Size(width, height), cv::INTER_NEAREST);
+                // printf("Image resized to %dx%d \n", width, height);
+                if (myTensorIndex>220){
+                    // Normalize image from 0 to 1
+                    image.convertTo(image, CV_32F, 1.0 / 255.0);
+                }
+                switch (interpreter->tensor(input)->type)
+                {
+                case kTfLiteFloat32:
+                    memcpy(interpreter->typed_input_tensor<float32_t>(0), image.data, image.total() * image.elemSize());
+                    break;
+                case kTfLiteUInt8:
+                    memcpy(interpreter->typed_input_tensor<uint8_t>(0), image.data, image.total() * image.elemSize());
+                    break;
+                case kTfLiteInt8:
+                    memcpy(interpreter->typed_input_tensor<uint8_t>(0), image.data, image.total() * image.elemSize());
+                    break;
+                default:
+                    fprintf(stderr, "cannot handle input type\n");
+                    exit(1);
+                }
+                // printf("Image copied to first input tensor\n");
+
+                // Inference
+                // std::chrono::steady_clock::time_point start, end;
+                // start = std::chrono::steady_clock::now();
+                TFLITE_MINIMAL_CHECK(interpreter->Invoke() == kTfLiteOk);//interpreter->Invoke();
+                // end = std::chrono::steady_clock::now();
+                // inference_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+                // printf("End of inference. Inference time : %s \n", std::to_string(inference_time).c_str());
+
+                // Get Output tensor index
+                int output = interpreter->outputs()[0];
+                TfLiteIntArray *output_dims = interpreter->tensor(output)->dims;
+                auto output_size = output_dims->data[output_dims->size - 1];
+                // Get the model classificaiton results
+                // std::vector<std::pair<float, int>> top_results;
+                // float threshold = 0.01f;
+                switch (interpreter->tensor(output)->type)
+                {
+                case kTfLiteInt32:
+                    tflite::label_image::get_top_n<float32_t>(interpreter->typed_output_tensor<float32_t>(0), output_size, 1, threshold, &top_results, kTfLiteFloat32);
+                    break;
+                case kTfLiteFloat32:
+                    tflite::label_image::get_top_n<float32_t>(interpreter->typed_output_tensor<float32_t>(0), output_size, 1, threshold, &top_results, kTfLiteFloat32);
+                    break;
+                case kTfLiteUInt8:
+                    tflite::label_image::get_top_n<uint8_t>(interpreter->typed_output_tensor<uint8_t>(0), output_size, 1, threshold, &top_results, kTfLiteUInt8);
+                    break;
+                case kTfLiteInt8:
+                    tflite::label_image::get_top_n<uint8_t>(interpreter->typed_output_tensor<uint8_t>(0), output_size, 1, threshold, &top_results, kTfLiteUInt8);
+                    break;
+                default:
+                    fprintf(stderr, "cannot handle output type\n");
+                    exit(1);
+                }
+
+                // Vector to save the tensor values
+                std::vector<double> tensor_vector;
+                // Retrieve selected tensor values
+                if (myTensorType == kTfLiteUInt8 && numDims == 2) {
+                    printf("Type of the selected tensor [%d]: kTfLiteUInt8\n", myTensorIndex);
+                    // Retrieve output tensor values
+                    uint8_t* tensor_data_ptr = interpreter->typed_tensor<uint8_t>(myTensorIndex);
+                    // Print the some elements of the tensor
+                    printf("Some elements of the tensor [%d]:\n", myTensorIndex);
+                    for (int i = 500; i < 1000; i++) {
+                        printf("tensor_data_ptr[%d]: %d\n", i, tensor_data_ptr[i]);
+                    }
+                } else if (myTensorType == kTfLiteInt8 && numDims == 2) {
+                    printf("Type of the selected tensor [%d]: kTfLiteInt8\n", myTensorIndex);
+                    // Retrieve output tensor values
+                    int8_t* tensor_data_ptr = interpreter->typed_tensor<int8_t>(myTensorIndex);
+                    // Print the some elements of the tensor
+                    printf("Some elements of the tensor [%d]:\n", myTensorIndex);
+                    for (int i = 500; i < 1000; i++) {
+                        printf("tensor_data_ptr[%d]: %d\n", i, tensor_data_ptr[i]);
+                    }
+                } else if (myTensorType == kTfLiteFloat32 && numDims == 2) {
+                    // printf("Type of the selected tensor [%d]: kTfLiteFloat32\n", myTensorIndex);
+                    // Retrieve output tensor values
+                    float32_t* tensor_data_ptr = interpreter->typed_tensor<float32_t>(myTensorIndex);
+                    for (int i = 0; i < numElements; i++) {
+                        tensor_vector.push_back(tensor_data_ptr[i]);
+                    }
+                    // std::ofstream outputFile("/Users/kubotamacmini/Documents/cognitive_games/curr_vector.txt", std::ios::app);
+                    // if (outputFile.is_open()) {
+                    //     for (int i = 0; i < numElements; i++) {
+                    //         if (myTensorType == kTfLiteFloat32) {
+                    //             outputFile << std::fixed << std::setprecision(6) << tensor_data_ptr[i] << " ";
+                    //         } else {
+                    //             outputFile << tensor_data_ptr[i] << " ";
+                    //         }
+                    //     }
+                    //     outputFile << "\n";
+                    //     outputFile.close();
+                    //     // printf("Tensor saved to file: curr_vector.txt\n");
+                    // } else {
+                    //     printf("Failed to open file: curr_vector.txt\n");
+                    // }
+                }
+                // Clean up the interpreter
+                interpreter->ResetVariableTensors();
+
+                // Classify the image features vector
+                std::pair<int, std::string> similar_class = find_similar_class(tensor_vector, centroid_per_cluster, class_labels);
+                std::string current_class = similar_class.second;
+
+                cv::putText(frame_loop_wrect, "Figure recognized as "+current_class, cv::Point(0.45*frameWidth , 0.9*frameHeight), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 2);
+                cv::imshow("Frame", frame_loop_wrect);
+
+                if (class_verification_list.size() == 4) {
+                    class_verification_list.erase(class_verification_list.begin());
+                }
+                class_verification_list.push_back(current_class);
+
+                if (std::all_of(class_verification_list.begin(), class_verification_list.end(), [](const std::string& cls) { return cls == "L"; })) {
+                    printf("Challenge completed\n");
+                    correct_ans = true;
+                    challenge_end_time = std::chrono::steady_clock::now();
+                    user_time = std::chrono::duration_cast<std::chrono::milliseconds>(challenge_end_time - challenge_start_time).count();
+                    challenge_start_flag = false;
+                }
+                
+                int key = cv::waitKey(1);
+                // Check if key is pressed to exit the loop
+                if (key == 'q') {
+                // frame = frame_loop;
+                break;
+                }
+                if (key == 'e') {
+                printf("Challenge completed\n");
+                correct_ans = true;
+                challenge_end_time = std::chrono::steady_clock::now();
+                user_time = std::chrono::duration_cast<std::chrono::milliseconds>(challenge_end_time - challenge_start_time).count();
+                challenge_start_flag = false;
+                }
+            }
+            if (correct_ans){
+                challenge_start_flag = false;
+                if (user_time < 4000) {
+                    // Time is less than 4000 ms
+                    user_score = 20;
+                } else if (user_time < 5000) {
+                    // Time is between 4000 ms and 5000 ms
+                    user_score = 18;
+                } else if (user_time < 6000) {
+                    // Time is between 5000 ms and 6000 ms
+                    user_score = 15;
+                } else if (user_time < 7000) {
+                    // Time is between 6000 ms and 7000 ms
+                    user_score = 10;
+                } else {
+                    // Time is greater than or equal to 7000 ms
+                    user_score = 5;
+                }
+                DeviceCommand = 7;
+                DeviceData = user_score;
+                DeviceStage = 3104;
+                // Send
+                printf("User Score is: %d\n", user_score);
+                while(ScenarioStage == 3103);
+            }
             int key = cv::waitKey(1);
-            // Check if key is pressed to exit the loop
+                // Check if key is pressed to exit the loop
             if (key == 'q') {
-            // frame = frame_loop;
-            break;
-            } else if (key == 'i') {
-            // frame = frame_loop;
-            inferenceButtonPressed = true;
-            break;
+                // frame = frame_loop;
+                app_start_flag = false;
+                cap.release(); // Release the camera
+                cv::destroyAllWindows();
+                break;
+            }
+            if (key == 'w') {
+                // frame = frame_loop;
+                challenge_start_flag = true;
+                challenge_start_time = std::chrono::steady_clock::now();
+                printf("Challenge starting\n");
+            }
+            if (key == 'e') {
+                // frame = frame_loop;
+                game_start_flag = false;
+                printf("Game finishing\n");
             }
         }
-        cap.release(); // Release the camera
-        cv::destroyAllWindows();
-        printf("Sliders stored values: \nShadow: %d, Saturation: %d, Multiply: %d \n", storedValueShadow, storedValueSaturation, storedValueMultiply);
-
-        numIters += 1;
-        printf("********** Iteration end ********** \n");
+        if (correct_ans){
+            cap.release(); // Release the camera
+            cv::destroyAllWindows();
+            printf("Game stopped\n");
+            correct_ans = false;
+            // ScenarioStage = "9999";
+        }
+        int key_0 = cv::waitKey(1);
+        if (key_0 == 'q') {
+            // frame = frame_loop;
+            app_start_flag = false;
+            cap.release();
+        }
     }
-    printf("Number of iterations: %d\n", numIters);
-    
-    
+    printf("Application finished\n");
     if (paths.size() == 1) {
         // Print inference ms in input image
-        cv::putText(frame, "Inference Time in ms: " + std::to_string(inference_time), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
+        // cv::putText(frame, "Inference Time in ms: " + std::to_string(inference_time), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
 
         // Load Labels
         auto labels = load_model_labels(labelFile);
@@ -1174,6 +1606,8 @@ int main(int argc, char **argv)
         cv::imshow("Output", frame);
         cv::waitKey(0);
     }
-    
+    // pthread_join(tid1, NULL);
+    pthread_cancel(tid1);
+
     return 0;
 }

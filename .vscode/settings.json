@@ -96,6 +96,7 @@
         "coroutine": "cpp",
         "typeindex": "cpp",
         "source_location": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "*.ipp": "cpp"
     }
 }
