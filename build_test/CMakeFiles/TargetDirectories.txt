@@ -1,0 +1,3 @@
+/Users/kubotamacmini/Documents/cognitive_games/build/CMakeFiles/main.dir
+/Users/kubotamacmini/Documents/cognitive_games/build/CMakeFiles/edit_cache.dir
+/Users/kubotamacmini/Documents/cognitive_games/build/CMakeFiles/rebuild_cache.dir

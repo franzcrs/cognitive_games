@@ -35,7 +35,10 @@ void onTrackbar(int value, void* userData) {
             // Draw the rectangle and its sides
             cv::Mat coloredBinary;
             cv::cvtColor(binary, coloredBinary, cv::COLOR_GRAY2BGR); // Convert binary to color
-            cv::drawContours(coloredBinary, std::vector<std::vector<cv::Point>>{approx}, -1, cv::Scalar(0, 255, 0), 2);
+            cv::drawContours(
+                
+                
+                , std::vector<std::vector<cv::Point>>{approx}, -1, cv::Scalar(0, 255, 0), 2);
             for (int i = 0; i < 4; ++i) {
                 cv::line(coloredBinary, approx[i], approx[(i + 1) % 4], cv::Scalar(0, 255, 0), 2);
             }
@@ -685,7 +688,7 @@ void senddata(){    // send state / DeviceCommand and data to the server
     }
 }
 
-
+/*
 void* iss( void* args ) // Sensor Node
 {
     int fin=0, l=0, m=0, n=0,
@@ -707,6 +710,7 @@ void* iss( void* args ) // Sensor Node
     }
     return NULL;
 }
+*/
 
 #define TFLITE_MINIMAL_CHECK(x)                              \
   if (!(x)) {                                                \
@@ -851,25 +855,33 @@ int main(int argc, char **argv)
         "/Users/kubotamacmini/Documents/cognitive_games/L_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/L_2_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/L_3_vectors.txt",
+        // "/Users/kubotamacmini/Documents/cognitive_games/L_4_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/C_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/C_2_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/C_3_vectors.txt",
+        "/Users/kubotamacmini/Documents/cognitive_games/C_4_vectors.txt",
+        // "/Users/kubotamacmini/Documents/cognitive_games/C_5_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/None_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/None_letter_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/None_letter_2_vectors.txt",
+        // "/Users/kubotamacmini/Documents/cognitive_games/None_letter_3_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/None_bg_vectors.txt"
     };
     std::vector<std::string> class_labels = {
         "L",
         "L",
         "L",
+        // "L",
         "C",
         "C",
         "C",
+        "C",
+        // "C",
         "None",
         "None",
         "None",
-        "None"
+        "None",
+        // "None"
     };
     std::string centroid_type = "mean";// In the meantime only mean is supported
     std::string similarity_type = "cosine";//"euclidean";
@@ -1176,7 +1188,7 @@ int main(int argc, char **argv)
     // Interface setup
     int sliderOffsetX = 29;//35; // Slider value for X offset
     int storedOffsetX = sliderOffsetX;//35; // Slider value for X offset
-    int sliderOffsetY = 22;//0; // Slider value for Y offset
+    int sliderOffsetY = 20;//0; // Slider value for Y offset
     int storedOffsetY = sliderOffsetY;//0; // Slider value for Y offset
     int maxSliderValueX = int((1.0-cropProportionWidth)*100); // Maximum slider value for X offset
     int maxSliderValueY = int((1.0-cropProportionHeight)*100); // Maximum slider value for Y offset
@@ -1204,27 +1216,34 @@ int main(int argc, char **argv)
     cv::createTrackbar(trackbarNameMultiply, "Frame", &sliderValueMultiply, maxSliderValueMultiply, onTrackbarChange, &storedValueMultiply);
 
     // Game variables set up
-    auto user_time = 0;
+    auto user_time = 0, elapsed_time = 0;
     int user_score = 0;
     bool correct_ans = false;
-    std::chrono::steady_clock::time_point challenge_start_time, challenge_end_time;
     bool game_start_flag = false;
     bool challenge_start_flag;
+    std::string game_answer = "C";
+    printf("Game variables set up. Game answer: %s\n", game_answer.c_str());
+
+    // Communication set up
+    ISS_UDP_receive();
+    ISSstate=-1;        //  not started
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 400000000;     // 0.4 msec Coomunication Time Interval
     ScenarioStage = 0000;
     DeviceCommand = 00;
     DeviceData = 00;
     DeviceStage = 0002;
-    printf("Game variables set up\n");
-
-    // Communication set up
-    int fin=0;
-    ISS_UDP_receive();
-    ISSstate=-1;        //  not started
-    pthread_t tid1;   // Thread ID
-    pthread_create(&tid1, NULL, iss, (void *)NULL);
-    printf("Communication set up\n");
-    printf("First Connection attempted\n");
-
+    printf("Communication setup. Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
+    while (ScenarioStage == 0000){
+        DataSent = 0;
+        senddata();
+        nanosleep(&ts, NULL);
+        printf("Communication attempted. Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
+    }
+    printf("First Connection established\n");
+    // pthread_t tid1;   // Thread ID
+    // pthread_create(&tid1, NULL, iss, (void *)NULL);
     bool app_start_flag = true;
     // Application loop
     while (app_start_flag){
@@ -1232,46 +1251,63 @@ int main(int argc, char **argv)
         // ISS_UDP_receive();
         // Initialize game variables
         user_time = 0;
+        elapsed_time = 0;
         user_score = 0;
+        // challenge_start_time = std::chrono::steady_clock::now();
+        // challenge_end_time = std::chrono::steady_clock::now();
+        // challenge_current_time = std::chrono::steady_clock::now();
         correct_ans = false;
         game_start_flag = false;
         challenge_start_flag = false;
-        ScenarioStage = 0000;
-        DeviceCommand = 00;
-        DeviceData = 00;
-        DeviceStage = 0002;
+        // ScenarioStage = 0000;
+        // DeviceCommand = 00;
+        // DeviceData = 00;
+        // DeviceStage = 0002;
+        printf("App running... Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
+        // DataSent = 0;
+        // senddata();
+        // nanosleep(&ts, NULL);
         // Open the default camera
         cv::VideoCapture cap(0);
         if (readFromCamera && !cap.isOpened()) { // Check if the camera opened successfully
             std::cerr << "Error: Unable to open camera" << std::endl;
             return -1;
         }
-        if (ScenarioStage == 0002){
-            DeviceCommand = 00;
-            DeviceData = 00;
-            DeviceStage = 0002;
-            // Send
-            printf("Received: %d. Returning same Scenario Stage\n", ScenarioStage);
-        }
-        else if (ScenarioStage == 3101){
+        if (ScenarioStage == 3101){
             DeviceCommand = 06;
             DeviceData = 31;
             DeviceStage = 3102;
             game_start_flag = true;
             // Send
-            printf("Received: %d. Starting Game\n", ScenarioStage);
+            printf("Starting game. Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
+            DataSent = 0;
+            senddata();
+            nanosleep(&ts, NULL);
         }
+        else{ // if (ScenarioStage == 0002){
+            DeviceCommand = 00;
+            DeviceData = 00;
+            DeviceStage = 0002;
+            // Send
+            printf("Returning message. Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
+            DataSent = 0;
+            senddata();
+            nanosleep(&ts, NULL);
+        }
+        // int counter = 0;
         while (game_start_flag){
-            printf("Game running...\n");
+            std::chrono::steady_clock::time_point challenge_start_time;
+            printf("Game running... Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
             // Frame to use in loop
             cv::Mat frame_loop_init;
             // Get frame from camera
+            printf("readFromCamera var: %d\n", readFromCamera);
             if (readFromCamera) cap.read(frame_loop_init);
             // Rotate frame_loop
             cv::rotate(frame_loop_init, frame_loop_init, cv::ROTATE_180);
             // Zoom in frame_loop
             cv::Mat zoomed_frame_loop;
-            cv::resize(frame_loop_init, zoomed_frame_loop, cv::Size(), 1.5, 1.5, cv::INTER_LINEAR);
+            cv::resize(frame_loop_init, zoomed_frame_loop, cv::Size(), 1.6, 1.6, cv::INTER_LINEAR);
             frame_loop_init = zoomed_frame_loop(cv::Rect((zoomed_frame_loop.cols - frame_loop_init.cols) / 2, (zoomed_frame_loop.rows - frame_loop_init.rows) / 2, frame_loop_init.cols, frame_loop_init.rows));
             if (readFromCamera && frame_loop_init.empty()) {
                 printf("Failed to capture frame from camera\n");
@@ -1302,19 +1338,52 @@ int main(int argc, char **argv)
             if (ScenarioStage == 3103){
                 challenge_start_flag = true;
                 challenge_start_time = std::chrono::steady_clock::now();
-                printf("Received: %d. Challenge starting\n", ScenarioStage);
+                printf("Starting challenge. Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
             }
             else if(ScenarioStage == 3105){
                 DeviceCommand = 8;
-                DeviceData = 00;
-                DeviceStage = 0004;
-                // Send
+                DeviceData = 0;
+                DeviceStage = 4;
                 game_start_flag = false;
-                printf("Received: %d. Game finishing\n", ScenarioStage);
+                printf("Finalizing game. Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
+                DataSent = 0;
+                senddata();
+                nanosleep(&ts, NULL);
+                DeviceCommand = 0;
+                DeviceData = 0;
+                DeviceStage = 2;
+                // cap.release();
+                // cv::destroyAllWindows();
+            }
+            else {
+                DeviceCommand = 00;
+                DeviceData = 00;
+                DeviceStage = 0002;
+                printf("Returning message. Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
+                DataSent = 0;
+                senddata();
+                nanosleep(&ts, NULL);
+            }
+            int key = cv::waitKey(1);
+                // Check if key is pressed to exit the loop
+            if (key == 'q') {
+                break;
+            }
+            if (key == 'w') {
+                challenge_start_flag = true;
+                challenge_start_time = std::chrono::steady_clock::now();
+                printf("Challenge starting\n");
+            }
+            if (key == 'e') {
+                game_start_flag = false;
+                printf("Finalizing game\n");
+                // cap.release();
+                // cv::destroyAllWindows();
             }
             // Inference Loop
             std::vector<std::string> class_verification_list;
             while (challenge_start_flag){
+                std::chrono::steady_clock::time_point challenge_end_time, challenge_current_time;
                 // Allocate tensor buffers.
                 TFLITE_MINIMAL_CHECK(interpreter->AllocateTensors() == kTfLiteOk);
 
@@ -1326,7 +1395,7 @@ int main(int argc, char **argv)
                 cv::rotate(frame_loop, frame_loop, cv::ROTATE_180);
                 // Zoom in frame_loop
                 cv::Mat zoomed_frame_loop;
-                cv::resize(frame_loop, zoomed_frame_loop, cv::Size(), 1.5, 1.5, cv::INTER_LINEAR);
+                cv::resize(frame_loop, zoomed_frame_loop, cv::Size(), 1.6, 1.6, cv::INTER_LINEAR);
                 frame_loop = zoomed_frame_loop(cv::Rect((zoomed_frame_loop.cols - frame_loop.cols) / 2, (zoomed_frame_loop.rows - frame_loop.rows) / 2, frame_loop.cols, frame_loop.rows));
                 if (readFromCamera && frame_loop.empty()) {
                     printf("Failed to capture frame from camera\n");
@@ -1495,16 +1564,25 @@ int main(int argc, char **argv)
                 cv::putText(frame_loop_wrect, "Figure recognized as "+current_class, cv::Point(0.45*frameWidth , 0.9*frameHeight), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 2);
                 cv::imshow("Frame", frame_loop_wrect);
 
-                if (class_verification_list.size() == 4) {
+                if (class_verification_list.size() == 3) {
                     class_verification_list.erase(class_verification_list.begin());
                 }
                 class_verification_list.push_back(current_class);
 
-                if (std::all_of(class_verification_list.begin(), class_verification_list.end(), [](const std::string& cls) { return cls == "L"; })) {
+                if (std::all_of(class_verification_list.begin(), class_verification_list.end(), [game_answer](const std::string& cls) { return cls == game_answer; })) {
                     printf("Challenge completed\n");
                     correct_ans = true;
                     challenge_end_time = std::chrono::steady_clock::now();
                     user_time = std::chrono::duration_cast<std::chrono::milliseconds>(challenge_end_time - challenge_start_time).count();
+                    challenge_start_flag = false;
+                }
+
+                challenge_current_time = std::chrono::steady_clock::now();
+                elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(challenge_current_time - challenge_start_time).count();
+                if (elapsed_time > 60000) {
+                    printf("Challenge time exceeded 60s\n");
+                    user_time = elapsed_time;
+                    correct_ans = true;
                     challenge_start_flag = false;
                 }
                 
@@ -1515,7 +1593,7 @@ int main(int argc, char **argv)
                 break;
                 }
                 if (key == 'e') {
-                printf("Challenge completed\n");
+                printf("Challenge stopped\n");
                 correct_ans = true;
                 challenge_end_time = std::chrono::steady_clock::now();
                 user_time = std::chrono::duration_cast<std::chrono::milliseconds>(challenge_end_time - challenge_start_time).count();
@@ -1523,63 +1601,49 @@ int main(int argc, char **argv)
                 }
             }
             if (correct_ans){
-                challenge_start_flag = false;
                 if (user_time < 4000) {
                     // Time is less than 4000 ms
-                    user_score = 20;
+                    user_score = 6;
                 } else if (user_time < 5000) {
                     // Time is between 4000 ms and 5000 ms
-                    user_score = 18;
-                } else if (user_time < 6000) {
-                    // Time is between 5000 ms and 6000 ms
-                    user_score = 15;
+                    user_score = 5;
                 } else if (user_time < 7000) {
+                    // Time is between 5000 ms and 6000 ms
+                    user_score = 4;
+                } else if (user_time < 9000) {
                     // Time is between 6000 ms and 7000 ms
-                    user_score = 10;
+                    user_score = 3;
                 } else {
                     // Time is greater than or equal to 7000 ms
-                    user_score = 5;
+                    user_score = 2;
                 }
+                printf("User Score is: %d\n", user_score);
                 DeviceCommand = 7;
                 DeviceData = user_score;
                 DeviceStage = 3104;
+                challenge_start_flag = false;
+                correct_ans = false;
                 // Send
-                printf("User Score is: %d\n", user_score);
-                while(ScenarioStage == 3103);
+                printf("Finalizing challenge. Stage: %d - Next: %d - Command: %d - Data: %d\n", ScenarioStage, DeviceStage, DeviceCommand, DeviceData);
+                DataSent = 0;
+                senddata();
+                nanosleep(&ts, NULL);
+                while(ScenarioStage == 3103){
+                    DeviceCommand = 7;
+                    DeviceData = user_score;
+                    DeviceStage = 3104;
+                    DataSent = 0;
+                    senddata();
+                    nanosleep(&ts, NULL);
+                };
             }
-            int key = cv::waitKey(1);
-                // Check if key is pressed to exit the loop
-            if (key == 'q') {
-                // frame = frame_loop;
-                app_start_flag = false;
-                cap.release(); // Release the camera
-                cv::destroyAllWindows();
-                break;
-            }
-            if (key == 'w') {
-                // frame = frame_loop;
-                challenge_start_flag = true;
-                challenge_start_time = std::chrono::steady_clock::now();
-                printf("Challenge starting\n");
-            }
-            if (key == 'e') {
-                // frame = frame_loop;
-                game_start_flag = false;
-                printf("Game finishing\n");
-            }
-        }
-        if (correct_ans){
-            cap.release(); // Release the camera
-            cv::destroyAllWindows();
-            printf("Game stopped\n");
-            correct_ans = false;
-            // ScenarioStage = "9999";
         }
         int key_0 = cv::waitKey(1);
         if (key_0 == 'q') {
-            // frame = frame_loop;
             app_start_flag = false;
+            cv::destroyAllWindows();
             cap.release();
+            printf("Finalizing application\n");
         }
     }
     printf("Application finished\n");
@@ -1607,7 +1671,7 @@ int main(int argc, char **argv)
         cv::waitKey(0);
     }
     // pthread_join(tid1, NULL);
-    pthread_cancel(tid1);
+    // pthread_cancel(tid1);
 
     return 0;
 }
