@@ -1186,7 +1186,7 @@ int main(int argc, char **argv)
     int cropWidth = static_cast<int>(frameWidth * cropProportionWidth);
 
     // Interface setup
-    int sliderOffsetX = 29;//35; // Slider value for X offset
+    int sliderOffsetX = 35;//29;//35; // Slider value for X offset
     int storedOffsetX = sliderOffsetX;//35; // Slider value for X offset
     int sliderOffsetY = 20;//0; // Slider value for Y offset
     int storedOffsetY = sliderOffsetY;//0; // Slider value for Y offset
@@ -1307,7 +1307,7 @@ int main(int argc, char **argv)
             cv::rotate(frame_loop_init, frame_loop_init, cv::ROTATE_180);
             // Zoom in frame_loop
             cv::Mat zoomed_frame_loop;
-            cv::resize(frame_loop_init, zoomed_frame_loop, cv::Size(), 1.6, 1.6, cv::INTER_LINEAR);
+            cv::resize(frame_loop_init, zoomed_frame_loop, cv::Size(), 1.4, 1.4, cv::INTER_LINEAR);//1.6, 1.6, cv::INTER_LINEAR);
             frame_loop_init = zoomed_frame_loop(cv::Rect((zoomed_frame_loop.cols - frame_loop_init.cols) / 2, (zoomed_frame_loop.rows - frame_loop_init.rows) / 2, frame_loop_init.cols, frame_loop_init.rows));
             if (readFromCamera && frame_loop_init.empty()) {
                 printf("Failed to capture frame from camera\n");

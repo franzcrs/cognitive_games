@@ -569,6 +569,7 @@ int main(int argc, char **argv)
         "/Users/kubotamacmini/Documents/cognitive_games/C_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/C_2_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/C_3_vectors.txt",
+        "/Users/kubotamacmini/Documents/cognitive_games/C_4_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/None_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/None_letter_vectors.txt",
         "/Users/kubotamacmini/Documents/cognitive_games/None_letter_2_vectors.txt",
@@ -578,6 +579,7 @@ int main(int argc, char **argv)
         "L",
         "L",
         "L",
+        "C",
         "C",
         "C",
         "C",
@@ -931,7 +933,7 @@ int main(int argc, char **argv)
         if (!readFromCamera) printf("Image loaded from %s \n", imagePath.c_str());
         int sliderOffsetX = 29;//35; // Slider value for X offset
         int storedOffsetX = sliderOffsetX;//35; // Slider value for X offset
-        int sliderOffsetY = 22;//0; // Slider value for Y offset
+        int sliderOffsetY = 20;//0; // Slider value for Y offset
         int storedOffsetY = sliderOffsetY;//0; // Slider value for Y offset
         int maxSliderValueX = int((1.0-cropProportionWidth)*100); // Maximum slider value for X offset
         int maxSliderValueY = int((1.0-cropProportionHeight)*100); // Maximum slider value for Y offset
@@ -970,7 +972,7 @@ int main(int argc, char **argv)
             cv::rotate(frame_loop, frame_loop, cv::ROTATE_180);
             // Zoom in frame_loop
             cv::Mat zoomed_frame_loop;
-            cv::resize(frame_loop, zoomed_frame_loop, cv::Size(), 1.5, 1.5, cv::INTER_LINEAR);
+            cv::resize(frame_loop, zoomed_frame_loop, cv::Size(), 1.6, 1.6, cv::INTER_LINEAR);
             frame_loop = zoomed_frame_loop(cv::Rect((zoomed_frame_loop.cols - frame_loop.cols) / 2, (zoomed_frame_loop.rows - frame_loop.rows) / 2, frame_loop.cols, frame_loop.rows));
             if (readFromCamera && frame_loop.empty()) {
                 printf("Failed to capture frame from camera\n");
