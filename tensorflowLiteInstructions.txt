@@ -11,6 +11,12 @@ https://github.com/mrdbourke/m1-machine-learning-test#how-to-setup-a-tensorflow-
 Install Xcode app and Command Line Tools
 https://www.freecodecamp.org/news/install-xcode-command-line-tools/
 
+Download more models for tensorflow lite from:
+https://www.kaggle.com/models?framework=tfLite&orderby=hotness
+
+Consult the following documentation for using tensorflow lite in C++:
+https://www.tensorflow.org/lite/api_docs/cc/class/tflite/impl/interpreter
+
 Troubleshooting:
 The directory tree for tflite-dist should be:
 tflite-dist
@@ -64,9 +70,3 @@ target_link_libraries(main
 ----------------------------------------------------------------------
 
 zsh: segmentation fault Error happens when you assign a wrong type of the destination tensor
-
-
-
-
-
-
